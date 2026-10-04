@@ -1,7 +1,9 @@
 import { resolveCaptureOptions } from "./config.ts";
+import { loadEnvFile } from "./load-env.ts";
 import { runCapture } from "./run.ts";
 
 async function main(): Promise<void> {
+  await loadEnvFile();
   const options = resolveCaptureOptions();
   console.log(`baseUrl=${options.baseUrl}`);
   console.log(`outputDir=${options.outputDir}`);

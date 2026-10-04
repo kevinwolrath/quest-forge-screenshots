@@ -25,7 +25,7 @@ npx playwright install chromium
 cp .env.example .env
 ```
 
-Edit `.env` and set `SCREENSHOT_BASE_URL` to the credential-free origin of the running app (scheme + host[+port], no path, no username/password). Do not commit `.env`.
+Edit `.env` and replace the `HOST:PORT` placeholders in `SCREENSHOT_BASE_URL` with the credential-free origin of the running app (scheme + host[+port], no path, no username/password). `npm run capture` loads `.env` when present; variables already set in the shell win. Do not commit `.env`.
 
 ## Configuration
 
@@ -79,7 +79,7 @@ export SCREENSHOT_BASE_URL="http://HOST:PORT"   # your running app origin
 npm run capture
 ```
 
-Or load values from `.env` in your shell before running. Output:
+Or export the variables in your shell (shell values override `.env`). Output:
 
 - `screenshot-output/<screen>/<viewport>-<w>x<h>.png`
 - `screenshot-output/manifest.json` (URL, timestamp, viewports, routes, results, optional SHA)
