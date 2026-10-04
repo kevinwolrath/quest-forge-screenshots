@@ -147,7 +147,7 @@ With Docker available, the same fixture can be checked inside the capture image,
 npm run capture:docker-fixture
 ```
 
-That command is fixture verification only. It is not a `.45` run and it does not capture QuestForge.
+That command is fixture verification only. It is not a `.45` run and it does not capture QuestForge. It uses its own temporary output and artifact directories and a separate Compose project name, so it does not mount, modify, or delete `screenshot-output/`, `screenshot-artifact/`, or a capture lock already in those folders. Production capture still uses the mounts in `compose.yaml`.
 
 ## GitHub Actions on `.45`
 

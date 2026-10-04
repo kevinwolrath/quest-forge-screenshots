@@ -48,6 +48,7 @@ describe("docker capture runtime", () => {
       "- ./screenshot-output:/output",
       "- ./screenshot-artifact:/artifact",
     ]);
+    assert.match(compose, /^name: questforge-screenshot-capture$/m);
     assert.match(compose, /host\.docker\.internal:host-gateway/);
     assert.match(compose, /SCREENSHOT_BASE_URL: \$\{SCREENSHOT_BASE_URL:-\}/);
     assert.match(compose, /SCREENSHOT_CONFIG_DIR: \/config/);
