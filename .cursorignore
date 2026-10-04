@@ -1,0 +1,22 @@
+# Credentials and local configuration
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+*.pem
+*.key
+
+# Generated screenshots and archives
+screenshots/
+screenshot-output/
+test-results/
+playwright-report/
+*.zip
+*.har
+
+# Local build output
+node_modules/
+dist/
+coverage/
+.wrangler/
+.git/
