@@ -112,15 +112,16 @@ Workflow: [`.github/workflows/screenshots-45.yml`](.github/workflows/screenshots
 Set repository variable **`SCREENSHOT_RUNNER_LABELS`**:
 
 1. Open this repo on GitHub → **Settings** → **Secrets and variables** → **Actions** → **Variables**
-2. Create `SCREENSHOT_RUNNER_LABELS` as a JSON array of the labels on your `.45` screenshot runner
+2. Create `SCREENSHOT_RUNNER_LABELS` as a nonempty JSON array of nonempty strings for your `.45` screenshot runner
+3. The array **must include** `"self-hosted"` (plus your real lane labels)
 
-Example shape (replace with your actual labels):
+Example shape (replace non-`self-hosted` labels with your actual ones):
 
 ```json
 ["self-hosted","Windows","X64","questforge-screenshots"]
 ```
 
-If the variable is missing or invalid, a GitHub-hosted `validate-config` job fails promptly. The self-hosted `.45` capture job is not queued until that validation succeeds (no fake fallback runner label).
+A GitHub-hosted `validate-config` job checks this variable first. If it is missing, not valid JSON, empty, contains blank strings, or omits `self-hosted`, that job fails promptly and the `.45` capture job is never scheduled. There is no fake fallback runner label. Capture itself still runs only on `.45` after validation succeeds. The workflow remains `workflow_dispatch` only (no `pull_request` execution on `.45`).
 
 ### Secrets / inputs
 
@@ -153,7 +154,7 @@ If the variable is missing or invalid, a GitHub-hosted `validate-config` job fai
 | Navigation / timeout failures | Confirm the app is up from the capture host; raise `SCREENSHOT_NAVIGATION_TIMEOUT_MS` / `SCREENSHOT_READY_TIMEOUT_MS` if needed. |
 | Ready selector timeout | Fix or clear `readySelector` for that screen; do not invent selectors. |
 | Lock errors | Another capture holds `screenshot-output/.capture.lock`. Wait, or remove only if no capture is running. |
-| Workflow: runner labels not configured | Set `SCREENSHOT_RUNNER_LABELS` as documented above. |
+| Workflow: runner labels not configured / invalid | Set `SCREENSHOT_RUNNER_LABELS` to a nonempty JSON string array that includes `self-hosted`. The hosted `validate-config` job fails before `.45` is queued. |
 | Workflow cannot reach the app | `.45` must resolve `SCREENSHOT_BASE_URL` on your LAN; this tool will not start the app. |
 | Fixture passes but real capture fails | Expected distinction: fixture ≠ QuestForge verification. |
 

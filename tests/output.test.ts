@@ -87,6 +87,39 @@ describe("clearManagedCaptureOutputs", () => {
     await access(path.join(dir, "manifest.json"));
   });
 
+  it("preserves unrelated PNGs that are not listed in the previous manifest", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "capture-unrelated-"));
+    await mkdir(path.join(dir, "home"), { recursive: true });
+    await writeFile(path.join(dir, "home", "listed.png"), "listed");
+    await writeFile(path.join(dir, "home", "unrelated.png"), "keep");
+    await writeFile(
+      path.join(dir, "manifest.json"),
+      manifestWithFiles(["home/listed.png"]),
+    );
+
+    await clearManagedCaptureOutputs(dir);
+
+    await assert.rejects(() => access(path.join(dir, "home", "listed.png")));
+    assert.equal(
+      await readFile(path.join(dir, "home", "unrelated.png"), "utf8"),
+      "keep",
+    );
+  });
+
+  it("rejects absolute manifest paths and leaves local files untouched", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "capture-abs-"));
+    await mkdir(path.join(dir, "home"), { recursive: true });
+    await writeFile(path.join(dir, "home", "keep.png"), "keep");
+    await writeFile(
+      path.join(dir, "manifest.json"),
+      manifestWithFiles(["/tmp/absolute.png"]),
+    );
+
+    await clearManagedCaptureOutputs(dir);
+
+    await access(path.join(dir, "home", "keep.png"));
+  });
+
   it("rejects traversal paths from the manifest and leaves local files untouched", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "capture-travel-"));
     await mkdir(path.join(dir, "home"), { recursive: true });

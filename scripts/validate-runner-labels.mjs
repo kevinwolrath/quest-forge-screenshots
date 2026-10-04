@@ -34,7 +34,7 @@ export function parseRunnerLabels(raw) {
     );
   }
 
-  return parsed.map((label, index) => {
+  const labels = parsed.map((label, index) => {
     if (typeof label !== "string" || label.trim().length === 0) {
       throw new Error(
         `SCREENSHOT_RUNNER_LABELS[${index}] must be a non-empty string.`,
@@ -42,6 +42,14 @@ export function parseRunnerLabels(raw) {
     }
     return label.trim();
   });
+
+  if (!labels.includes("self-hosted")) {
+    throw new Error(
+      'SCREENSHOT_RUNNER_LABELS must include the "self-hosted" label.',
+    );
+  }
+
+  return labels;
 }
 
 function run() {

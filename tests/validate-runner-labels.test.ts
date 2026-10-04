@@ -27,6 +27,14 @@ describe("parseRunnerLabels", () => {
     assert.throws(() => mod.parseRunnerLabels("[]"), /non-empty/i);
     assert.throws(() => mod.parseRunnerLabels('["self-hosted",""]'), /non-empty string/i);
   });
+
+  it("requires the self-hosted label", async () => {
+    const mod = await import(pathToFileURL(scriptPath).href);
+    assert.throws(
+      () => mod.parseRunnerLabels('["Windows","X64","questforge-screenshots"]'),
+      /self-hosted/,
+    );
+  });
 });
 
 describe("validate-runner-labels CLI", () => {
@@ -49,5 +57,17 @@ describe("validate-runner-labels CLI", () => {
     });
     assert.equal(result.status, 0);
     assert.match(result.stdout, /runner labels ok/);
+  });
+
+  it("exits non-zero when self-hosted is absent", () => {
+    const result = spawnSync(process.execPath, [scriptPath], {
+      env: {
+        ...process.env,
+        SCREENSHOT_RUNNER_LABELS: '["Windows","X64"]',
+      },
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /self-hosted/);
   });
 });

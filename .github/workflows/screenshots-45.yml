@@ -8,12 +8,13 @@
 # - Does not run untrusted PR code on .45
 # - Automatic capture after QuestForge merges is NOT implemented here
 # - SCREENSHOT_RUNNER_LABELS is validated on github-hosted first so a missing
-#   variable fails promptly instead of queuing forever on a fake self-hosted label
+#   or invalid variable fails promptly instead of queuing forever on .45
+# - Labels must be a nonempty JSON string array that includes "self-hosted"
 #
 # Required configuration before the first real run:
 # 1. Repository variable SCREENSHOT_RUNNER_LABELS
-#    JSON array of GitHub Actions runner labels that select the .45 screenshot lane.
-#    Example shape (replace with your actual labels):
+#    Nonempty JSON array of nonempty label strings for the .45 screenshot lane.
+#    Must include "self-hosted". Example shape (replace other labels as needed):
 #      ["self-hosted","Windows","X64","questforge-screenshots"]
 #    Set at: Repo → Settings → Secrets and variables → Actions → Variables
 # 2. Repository secret SCREENSHOT_BASE_URL
