@@ -18,3 +18,26 @@ alwaysApply: true
 - Make the smallest scoped change. Read existing code and tests first; do not introduce extra frameworks or speculative abstractions.
 - Run focused tests and report exact commands/results. Fixture verification is not QuestForge verification. Do not run live QuestForge capture, Android, or device tests unless requested.
 - Do not claim Cloudflare account setup or deployment was verified unless it actually was.
+
+## Runtime boundaries: Docker and .45
+
+The production target is Docker-controlled screenshot capture on .45. The current PR runs Node and Playwright directly on the runner; Docker capture is still pending and must not be described as implemented.
+
+| Component | Intended runtime |
+| --- | --- |
+| GitHub Actions runner | Windows host .45; orchestrates checkout, Docker and artifact upload |
+| Label validation | GitHub-hosted validate-config job; no browser capture |
+| Screenshot tool, Node dependencies, Playwright and Chromium | Dedicated Linux Docker container on .45 |
+| QuestForge web application | Existing separately managed Docker service; capture connects through SCREENSHOT_BASE_URL |
+| Gallery and restricted publish endpoint | Cloudflare Worker with private R2; not a .45 Docker service |
+| Future ZIP publisher | Separate final step/container; publisher secret injected only there |
+
+- Do not require Kevin to install Node, npm packages or Chromium on .45 for production capture. Bare npm commands are optional development/fixture instructions only until Docker is implemented.
+- The host requires the existing runner and working Docker Desktop with Linux containers. Do not recreate runner services or modify unrelated containers.
+- Use an official Playwright container version matching the locked Playwright package. Install dependencies inside the image/container.
+- Container localhost is not the Windows host. Configure a reachable origin (for a host-published app port, use host.docker.internal); never hardcode the real host/IP or invent app network names.
+- Pass capture configuration at runtime and mount only the required configuration/output. Do not mount the Docker socket, QuestForge source or secrets unrelated to capture.
+- Capture stays manual and connects to the already-running app. Do not start, stop or rebuild QuestForge.
+- Report container fixture verification separately from live QuestForge and real .45 verification.
+- Update the relevant Linear issue with implementation, PR links, actual checks and remaining steps before handoff. Do not claim Done merely because a PR is open.
+
