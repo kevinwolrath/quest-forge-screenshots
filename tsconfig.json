@@ -15,6 +15,7 @@
   "include": [
     "src/**/*.ts",
     "capture/**/*.ts",
+    "publisher/**/*.ts",
     "scripts/**/*.ts",
     "tests/**/*.ts"
   ]
