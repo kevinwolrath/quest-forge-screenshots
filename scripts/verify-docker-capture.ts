@@ -10,26 +10,30 @@ import path from "node:path";
  * This does not capture QuestForge and does not run on .45.
  *
  * Output and artifact files go to a temporary directory and a unique Compose
- * project. The normal screenshot-output/ and screenshot-artifact/ folders,
- * including any capture lock, are not mounted or deleted.
+ * project. screenshot-output/ and screenshot-artifact/ are only read.
+ * This command does not create files or .capture.lock in those folders.
  *
  * Checks:
  * - desktop, tablet, and mobile PNGs against the local fixture
  * - failed capture exits 1
  * - managed output cleanup keeps unrelated files inside the temporary output
  * - artifact staging copies only the current manifest and successful PNGs
- * - pre-existing production output and artifact files survive success and failure
+ * - production output and artifact directories are not created or changed
  */
 
 const root = path.resolve(import.meta.dirname, "..");
-const productionOutput = path.join(root, "screenshot-output");
-const productionArtifact = path.join(root, "screenshot-artifact");
+// Tests may point the read-only guard at a temp tree. Compose still uses this repo.
+const guardRoot = process.env.QFS_DOCKER_FIXTURE_GUARD_ROOT?.trim()
+  ? path.resolve(process.env.QFS_DOCKER_FIXTURE_GUARD_ROOT.trim())
+  : root;
+const productionOutput = path.join(guardRoot, "screenshot-output");
+const productionArtifact = path.join(guardRoot, "screenshot-artifact");
 
 const unverifiedChecks = [
   "desktop, tablet, and mobile fixture capture inside Docker",
   "failed-capture exit status inside Docker",
   "managed output cleanup and artifact staging inside Docker",
-  "production screenshot folders survive fixture verification",
+  "production screenshot folders are not created or changed",
 ];
 
 type CommandResult = {
@@ -59,12 +63,7 @@ type Fingerprint = {
   outputExists: boolean;
   artifactExists: boolean;
   files: Map<string, string>;
-};
-
-type Plant = {
-  file: string;
-  contents: string;
-  createdDirs: string[];
+  directories: Set<string>;
 };
 
 type FixtureWorkspace = {
@@ -89,7 +88,6 @@ const expectedViewports = [
 let imageReady = false;
 let workspace: FixtureWorkspace | null = null;
 let originalProduction: Fingerprint | null = null;
-let planted: Plant[] = [];
 
 function errorCode(error: unknown): string {
   if (!error || typeof error !== "object" || !("code" in error)) {
@@ -217,7 +215,9 @@ async function exists(file: string): Promise<boolean> {
 
 async function fingerprintProduction(): Promise<Fingerprint> {
   const files = new Map<string, string>();
+  const directories = new Set<string>();
   async function walk(directory: string): Promise<void> {
+    directories.add(directory);
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
       const absolute = path.join(directory, entry.name);
@@ -238,113 +238,29 @@ async function fingerprintProduction(): Promise<Fingerprint> {
   if (artifactExists) {
     await walk(productionArtifact);
   }
-  return { outputExists, artifactExists, files };
+  return { outputExists, artifactExists, files, directories };
 }
 
-async function mkdirTracked(dir: string, created: string[]): Promise<void> {
-  const missing: string[] = [];
-  let current = path.resolve(dir);
-  const stop = path.resolve(root);
-  while (current !== stop) {
-    if (await exists(current)) {
-      break;
-    }
-    missing.push(current);
-    const parent = path.dirname(current);
-    if (parent === current) {
-      break;
-    }
-    current = parent;
-  }
-  await mkdir(dir, { recursive: true });
-  created.push(...missing);
-}
-
-async function plantFile(file: string, contents: string): Promise<Plant | null> {
-  if (await exists(file)) {
-    return null;
-  }
-  const createdDirs: string[] = [];
-  await mkdirTracked(path.dirname(file), createdDirs);
-  await writeFile(file, contents, { encoding: "utf8", flag: "wx" });
-  return { file, contents, createdDirs };
-}
-
-async function plantRegressionFiles(): Promise<void> {
-  const specs = [
-    [path.join(productionOutput, "regression-keep.txt"), "keep-output\n"],
-    [path.join(productionOutput, "home", "regression-keep.png"), "keep-png"],
-    [path.join(productionOutput, ".capture.lock"), "regression-sentinel\n"],
-    [path.join(productionArtifact, "regression-keep.txt"), "keep-artifact\n"],
-    [path.join(productionArtifact, "nested", "regression-keep.txt"), "keep-nested\n"],
-  ] as const;
-  for (const [file, contents] of specs) {
-    const plant = await plantFile(file, contents);
-    if (plant) {
-      planted.push(plant);
-    }
-  }
-}
-
-async function assertProductionSurvived(
-  original: Fingerprint,
-  plants: Plant[],
-): Promise<void> {
-  const current = await fingerprintProduction();
-  for (const [file, hash] of original.files) {
-    assert.equal(current.files.get(file), hash, `production file changed: ${file}`);
-  }
-  const plantedFiles = new Set(plants.map((plant) => plant.file));
-  for (const file of current.files.keys()) {
-    if (!original.files.has(file) && !plantedFiles.has(file)) {
-      assert.fail(`unexpected production file created: ${file}`);
-    }
-  }
-  for (const plant of plants) {
-    assert.equal(await readFile(plant.file, "utf8"), plant.contents, plant.file);
-  }
-}
-
-async function unplant(plants: Plant[]): Promise<void> {
-  for (const plant of plants) {
-    if (!(await exists(plant.file))) {
-      continue;
-    }
-    const current = await readFile(plant.file, "utf8");
-    if (current !== plant.contents) {
-      continue;
-    }
-    await rm(plant.file, { force: true });
-  }
-
-  const createdDirs = [...new Set(plants.flatMap((plant) => plant.createdDirs))].sort(
-    (left, right) => right.length - left.length,
-  );
-  for (const dir of createdDirs) {
-    if (dir === productionOutput || dir === productionArtifact || dir === root) {
-      const entries = await readdir(dir).catch(() => null);
-      if (!entries || entries.length > 0) {
-        continue;
-      }
-    }
-    try {
-      await rm(dir, { recursive: false, force: true });
-    } catch (error) {
-      if (errorCode(error) !== "ENOTEMPTY" && errorCode(error) !== "ENOENT") {
-        throw error;
-      }
-    }
-  }
-}
-
-async function assertRestored(original: Fingerprint): Promise<void> {
+async function assertProductionSurvived(original: Fingerprint): Promise<void> {
   const current = await fingerprintProduction();
   assert.equal(current.outputExists, original.outputExists);
   assert.equal(current.artifactExists, original.artifactExists);
+  assert.equal(current.directories.size, original.directories.size);
   assert.equal(current.files.size, original.files.size);
+  for (const dir of original.directories) {
+    assert.equal(current.directories.has(dir), true, `production directory removed: ${dir}`);
+  }
+  for (const dir of current.directories) {
+    assert.equal(original.directories.has(dir), true, `unexpected production directory created: ${dir}`);
+  }
   for (const [file, hash] of original.files) {
     assert.equal(current.files.get(file), hash, `production file changed: ${file}`);
   }
+  for (const file of current.files.keys()) {
+    assert.equal(original.files.has(file), true, `unexpected production file created: ${file}`);
+  }
+  const lockPath = path.join(productionOutput, ".capture.lock");
+  assert.equal(current.files.has(lockPath), original.files.has(lockPath));
 }
 
 async function assertTemporaryMounts(current: FixtureWorkspace): Promise<void> {
@@ -476,8 +392,8 @@ function reportDockerUnavailable(message: string): void {
 
 async function main(): Promise<void> {
   console.log("DOCKER FIXTURE VERIFICATION (not QuestForge, not a .45 run)");
-  originalProduction = await fingerprintProduction();
-  await plantRegressionFiles();
+  const original = await fingerprintProduction();
+  originalProduction = original;
 
   let info: CommandResult;
   try {
@@ -570,7 +486,7 @@ async function main(): Promise<void> {
     assert.notEqual(bytes.toString("utf8"), "stale");
   }
   await assertUnrelatedFilesKept(current.outputDir);
-  await assertProductionSurvived(originalProduction, planted);
+  await assertProductionSurvived(original);
 
   const stageOk = await runDocker(
     [...composeArgs(current), "run", "--rm", "-T", "--no-deps", "capture", "stage-artifact"],
@@ -581,7 +497,7 @@ async function main(): Promise<void> {
     ...expectedViewports.map((viewport) => expectedPng(viewport)),
     "manifest.json",
   ].sort());
-  await assertProductionSurvived(originalProduction, planted);
+  await assertProductionSurvived(original);
 
   await clearTempMounts(current);
   await seedOutput(current.outputDir);
@@ -627,7 +543,7 @@ async function main(): Promise<void> {
     await assert.rejects(() => access(path.join(current.outputDir, expectedPng(viewport))));
   }
   await assertUnrelatedFilesKept(current.outputDir);
-  await assertProductionSurvived(originalProduction, planted);
+  await assertProductionSurvived(original);
 
   const stageFailed = await runDocker(
     [...composeArgs(current), "run", "--rm", "-T", "--no-deps", "capture", "stage-artifact"],
@@ -635,12 +551,12 @@ async function main(): Promise<void> {
   );
   assert.equal(stageFailed.code, 0, "artifact staging after failed capture failed");
   assert.deepEqual(await listFiles(current.artifactDir), ["manifest.json"]);
-  await assertProductionSurvived(originalProduction, planted);
+  await assertProductionSurvived(original);
 
   console.log("Docker fixture verification passed.");
   console.log("Checked desktop, tablet, and mobile PNGs; failed-capture exit status 1;");
   console.log("managed-output cleanup; and artifact staging.");
-  console.log("Production screenshot folders were left in place.");
+  console.log("Production screenshot folders were not created or changed.");
   console.log("This was not a live QuestForge capture and not a .45 run.");
 }
 
@@ -683,22 +599,11 @@ main()
     try {
       await cleanupWorkspace();
       if (originalProduction) {
-        await assertProductionSurvived(originalProduction, planted);
+        await assertProductionSurvived(originalProduction);
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
       process.exitCode = 1;
-    } finally {
-      try {
-        await unplant(planted);
-        if (originalProduction) {
-          await assertRestored(originalProduction);
-        }
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(message);
-        process.exitCode = 1;
-      }
     }
   });
