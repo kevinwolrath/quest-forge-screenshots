@@ -190,7 +190,7 @@ async function main(): Promise<void> {
 
   let info: CommandResult;
   try {
-    info = await runDocker(["info", "--format", "{{.Server.OSType}}"], true);
+    info = await runDocker(["info", "--format", "{{.OSType}}"], true);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
