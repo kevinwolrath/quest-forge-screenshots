@@ -31,6 +31,18 @@ export async function disableAnimations(page: Page): Promise<void> {
   });
 }
 
+function intersectsViewport(
+  box: { top: number; left: number; bottom: number; right: number },
+  viewport: { width: number; height: number },
+): boolean {
+  return (
+    box.bottom > 0 &&
+    box.right > 0 &&
+    box.top < viewport.height &&
+    box.left < viewport.width
+  );
+}
+
 /**
  * Policy for viewport screenshots: wait for incomplete images that can appear
  * in the shot; do not wait forever for off-screen lazy images.
@@ -52,12 +64,29 @@ export function shouldWaitForImage(
   if (image.loading !== "lazy") {
     return true;
   }
-  const inViewport =
-    image.bottom > 0 &&
-    image.right > 0 &&
-    image.top < viewport.height &&
-    image.left < viewport.width;
-  return inViewport;
+  return intersectsViewport(image, viewport);
+}
+
+/**
+ * A settled visible image with naturalWidth 0 is broken (failed decode/load).
+ * Off-screen lazy images are ignored, matching screenshot scope.
+ */
+export function isBrokenVisibleImage(
+  image: {
+    complete: boolean;
+    naturalWidth: number;
+    loading: string | null;
+    top: number;
+    left: number;
+    bottom: number;
+    right: number;
+  },
+  viewport: { width: number; height: number },
+): boolean {
+  if (!intersectsViewport(image, viewport)) {
+    return false;
+  }
+  return image.complete && image.naturalWidth <= 0;
 }
 
 export async function waitForFontsAndImages(
@@ -94,4 +123,23 @@ export async function waitForFontsAndImages(
     undefined,
     { timeout: timeoutMs },
   );
+
+  const broken = await page.evaluate(() => {
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    return Array.from(document.images)
+      .filter((image) => {
+        const rect = image.getBoundingClientRect();
+        const inViewport =
+          rect.bottom > 0 &&
+          rect.right > 0 &&
+          rect.top < viewport.height &&
+          rect.left < viewport.width;
+        return inViewport && image.complete && image.naturalWidth <= 0;
+      })
+      .map((image) => image.currentSrc || image.src || "(unknown image)");
+  });
+
+  if (broken.length > 0) {
+    throw new Error(`broken visible image(s): ${broken.join(", ")}`);
+  }
 }

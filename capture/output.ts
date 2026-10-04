@@ -1,22 +1,29 @@
-import { readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const LOCK_NAME = ".capture.lock";
+import { resolveManagedOutputPath, resolveSafeDeletePath } from "./paths.ts";
+import type { RunManifest } from "./types.ts";
+
+function isRunManifest(value: unknown): value is RunManifest {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const manifest = value as RunManifest;
+  return Array.isArray(manifest.results);
+}
 
 /**
- * Remove managed capture artifacts from a previous run under the output lock.
- * Preserves `.capture.lock` and unrelated non-PNG files.
+ * Remove only files recorded as generated captures in the previous manifest.
+ * If the previous manifest is missing or invalid, delete nothing (no PNG wipe).
+ * Rejects absolute paths, traversal, and symlink escapes before any delete.
  */
 export async function clearManagedCaptureOutputs(outputDir: string): Promise<void> {
   const root = path.resolve(outputDir);
-  await rm(path.join(root, "manifest.json"), { force: true });
-  await removeManagedPngs(root);
-}
+  const manifestPath = path.join(root, "manifest.json");
 
-async function removeManagedPngs(dir: string): Promise<void> {
-  let entries;
+  let raw: string;
   try {
-    entries = await readdir(dir, { withFileTypes: true });
+    raw = await readFile(manifestPath, "utf8");
   } catch (error) {
     const code =
       error && typeof error === "object" && "code" in error
@@ -28,21 +35,69 @@ async function removeManagedPngs(dir: string): Promise<void> {
     throw error;
   }
 
-  for (const entry of entries) {
-    if (entry.name === LOCK_NAME) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return;
+  }
+
+  if (!isRunManifest(parsed)) {
+    return;
+  }
+
+  for (const result of parsed.results) {
+    if (!result || typeof result.file !== "string" || !result.file) {
       continue;
     }
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      await removeManagedPngs(fullPath);
-      const remaining = await readdir(fullPath);
-      if (remaining.length === 0) {
-        await rm(fullPath, { recursive: true, force: true });
-      }
+    let absoluteFile: string | null;
+    try {
+      absoluteFile = await resolveSafeDeletePath(root, result.file);
+    } catch {
+      // Reject unsafe paths; do not delete them and do not fall back to wiping PNGs.
       continue;
     }
-    if (entry.isFile() && entry.name.toLowerCase().endsWith(".png")) {
-      await rm(fullPath, { force: true });
+    if (absoluteFile) {
+      await rm(absoluteFile, { force: true });
     }
   }
+
+  await rm(manifestPath, { force: true });
+}
+
+/**
+ * Copy only this run's manifest and generated screenshot files into artifactDir
+ * so uploads cannot include unrelated files left in the output directory.
+ */
+export async function stageCurrentRunArtifact(
+  outputDir: string,
+  artifactDir: string,
+): Promise<string[]> {
+  const root = path.resolve(outputDir);
+  const stagingRoot = path.resolve(artifactDir);
+  const manifestPath = path.join(root, "manifest.json");
+  const raw = await readFile(manifestPath, "utf8");
+  const parsed = JSON.parse(raw) as unknown;
+  if (!isRunManifest(parsed)) {
+    throw new Error("current manifest.json is missing or invalid; cannot stage artifact");
+  }
+
+  await rm(stagingRoot, { recursive: true, force: true });
+  await mkdir(stagingRoot, { recursive: true });
+
+  const staged: string[] = ["manifest.json"];
+  await writeFile(path.join(stagingRoot, "manifest.json"), raw, "utf8");
+
+  for (const result of parsed.results) {
+    if (!result || result.status !== "ok" || typeof result.file !== "string" || !result.file) {
+      continue;
+    }
+    const source = resolveManagedOutputPath(root, result.file);
+    const destination = resolveManagedOutputPath(stagingRoot, result.file);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(source, destination);
+    staged.push(result.file);
+  }
+
+  return staged;
 }

@@ -50,6 +50,31 @@ describe("HTTP error capture", () => {
     await mkdir(path.join(outputDir, "home"), { recursive: true });
     await writeFile(stalePath, "stale-png");
     await writeFile(
+      path.join(outputDir, "manifest.json"),
+      `${JSON.stringify({
+        capturedAt: "2026-01-01T00:00:00.000Z",
+        baseUrl: "http://example.test",
+        appCommitSha: null,
+        appCommitShaVerified: false,
+        outputDir,
+        viewports: [],
+        routes: [],
+        results: [
+          {
+            screenId: "home",
+            path: "/",
+            viewportId: "desktop",
+            width: 800,
+            height: 600,
+            file: "home/desktop-1440x900.png",
+            status: "ok",
+            error: null,
+          },
+        ],
+        summary: { total: 1, ok: 1, failed: 0 },
+      })}\n`,
+    );
+    await writeFile(
       path.join(configDir, "screens.json"),
       JSON.stringify({
         screens: [{ id: "home", path: "/missing", readySelector: null }],

@@ -7,6 +7,8 @@
 # - workflow_dispatch only (no pull_request / push triggers)
 # - Does not run untrusted PR code on .45
 # - Automatic capture after QuestForge merges is NOT implemented here
+# - SCREENSHOT_RUNNER_LABELS is validated on github-hosted first so a missing
+#   variable fails promptly instead of queuing forever on a fake self-hosted label
 #
 # Required configuration before the first real run:
 # 1. Repository variable SCREENSHOT_RUNNER_LABELS
@@ -42,26 +44,29 @@ permissions:
   contents: read
 
 jobs:
+  validate-config:
+    name: Validate runner labels
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runner_labels: ${{ steps.validate.outputs.runner_labels }}
+    steps:
+      - name: Check out screenshot tooling
+        uses: actions/checkout@v4
+
+      - name: Validate SCREENSHOT_RUNNER_LABELS
+        id: validate
+        env:
+          SCREENSHOT_RUNNER_LABELS: ${{ vars.SCREENSHOT_RUNNER_LABELS }}
+        run: node scripts/validate-runner-labels.mjs
+
   capture:
     name: Capture screenshots
-    # Configure SCREENSHOT_RUNNER_LABELS before relying on .45.
-    # The fallback below is intentionally invalid so a missing variable fails closed
-    # instead of scheduling onto a random runner.
-    runs-on: ${{ fromJSON(vars.SCREENSHOT_RUNNER_LABELS || '["screenshot-runner-labels-not-configured"]') }}
+    needs: validate-config
+    runs-on: ${{ fromJSON(needs.validate-config.outputs.runner_labels) }}
     timeout-minutes: 45
 
     steps:
-      - name: Require runner labels configuration
-        shell: pwsh
-        env:
-          # Pass through env so JSON quotes are not interpolated into the script.
-          SCREENSHOT_RUNNER_LABELS: ${{ vars.SCREENSHOT_RUNNER_LABELS }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:SCREENSHOT_RUNNER_LABELS)) {
-            Write-Error "Set repository variable SCREENSHOT_RUNNER_LABELS to a JSON array of .45 runner labels. See README.md."
-            exit 1
-          }
-
       - name: Resolve base URL
         id: base_url
         shell: pwsh
@@ -109,12 +114,21 @@ jobs:
           SCREENSHOT_APP_COMMIT_SHA: ${{ inputs.app_commit_sha || secrets.SCREENSHOT_APP_COMMIT_SHA || vars.SCREENSHOT_APP_COMMIT_SHA }}
         run: npm run capture
 
+      - name: Stage current-run artifact
+        if: always()
+        shell: pwsh
+        env:
+          SCREENSHOT_OUTPUT_DIR: screenshot-output
+          SCREENSHOT_ARTIFACT_DIR: screenshot-artifact
+        run: npx tsx scripts/stage-artifact.ts
+
       - name: Upload screenshot artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: questforge-screenshots-${{ github.run_id }}.${{ github.run_attempt }}
-          path: screenshot-output/
+          # Upload only the staged current-run files (not the whole output dir).
+          path: screenshot-artifact/
           if-no-files-found: warn
           # Retention is 30 days unless the repository artifact retention setting is shorter.
           retention-days: 30

@@ -105,7 +105,7 @@ Workflow: [`.github/workflows/screenshots-45.yml`](.github/workflows/screenshots
 - No `pull_request` / `push` triggers (public PR code must not run on `.45`)
 - Does not start, stop, or alter QuestForge, containers, or unrelated processes
 - Concurrency group `screenshots-45` prevents overlapping capture jobs
-- Uploads `screenshot-output/` as an Actions artifact with **30-day** retention (or shorter if the repository artifact retention setting is lower)
+- Stages and uploads only the current run’s screenshots plus `manifest.json` as an Actions artifact with **30-day** retention (or shorter if the repository artifact retention setting is lower). Unrelated files left in the output directory are not uploaded.
 
 ### Runner labels (you must set these)
 
@@ -120,7 +120,7 @@ Example shape (replace with your actual labels):
 ["self-hosted","Windows","X64","questforge-screenshots"]
 ```
 
-If the variable is missing, the workflow fails closed instead of scheduling onto a random runner.
+If the variable is missing or invalid, a GitHub-hosted `validate-config` job fails promptly. The self-hosted `.45` capture job is not queued until that validation succeeds (no fake fallback runner label).
 
 ### Secrets / inputs
 
