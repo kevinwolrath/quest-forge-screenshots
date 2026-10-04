@@ -170,10 +170,13 @@ describe("stageCurrentRunArtifact", () => {
       manifestWithFiles(["home/desktop-1440x900.png"]),
     );
 
+    await writeFile(path.join(artifactDir, "leftover.txt"), "old");
+
     const staged = await stageCurrentRunArtifact(outputDir, artifactDir);
     assert.deepEqual(staged.sort(), ["home/desktop-1440x900.png", "manifest.json"].sort());
     await access(path.join(artifactDir, "manifest.json"));
     await access(path.join(artifactDir, "home", "desktop-1440x900.png"));
     await assert.rejects(() => access(path.join(artifactDir, "home", "unrelated.png")));
+    await assert.rejects(() => access(path.join(artifactDir, "leftover.txt")));
   });
 });

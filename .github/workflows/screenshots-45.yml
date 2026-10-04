@@ -1,7 +1,14 @@
 # Manual screenshot capture on Kevin's Windows home PC (.45).
 #
+# The runner orchestrates checkout, Docker, and artifact upload.
+# Node dependencies, Playwright, and Chromium run in the Linux capture
+# container (Dockerfile and compose.yaml). This job does not install them
+# on the host.
+#
 # This workflow does not start, stop, or alter QuestForge or unrelated processes.
-# It only checks out this repository and captures the URL you configure.
+# It captures the URL you configure. Container localhost is not the Windows
+# host; for a port published on the host, set SCREENSHOT_BASE_URL to
+# http://host.docker.internal:PORT.
 #
 # Public-repo safety:
 # - workflow_dispatch only (no pull_request / push triggers)
@@ -10,6 +17,7 @@
 # - SCREENSHOT_RUNNER_LABELS is validated on github-hosted first so a missing
 #   or invalid variable fails promptly instead of queuing forever on .45
 # - Labels must be a nonempty JSON string array that includes "self-hosted"
+# - Do not run `docker compose config` in this job; it prints runtime values.
 #
 # Required configuration before the first real run:
 # 1. Repository variable SCREENSHOT_RUNNER_LABELS
@@ -22,6 +30,8 @@
 #    for example http://HOST:PORT (no path, no username/password).
 # 3. Optional secret or variable SCREENSHOT_APP_COMMIT_SHA
 #    Recorded in the manifest as metadata only; not verified.
+# 4. Docker Desktop on .45, using Linux containers. Do not install Node or
+#    Chromium on the host for this workflow.
 
 name: Screenshots on 45
 
@@ -93,35 +103,21 @@ jobs:
       - name: Check out screenshot tooling
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Install dependencies
+      - name: Build capture image
         shell: pwsh
-        run: npm ci
-
-      - name: Install Playwright Chromium
-        shell: pwsh
-        run: npx playwright install chromium
+        run: docker compose build capture
 
       - name: Capture screenshots
         shell: pwsh
         env:
           SCREENSHOT_BASE_URL: ${{ steps.base_url.outputs.value }}
-          SCREENSHOT_OUTPUT_DIR: screenshot-output
           SCREENSHOT_APP_COMMIT_SHA: ${{ inputs.app_commit_sha || secrets.SCREENSHOT_APP_COMMIT_SHA || vars.SCREENSHOT_APP_COMMIT_SHA }}
-        run: npm run capture
+        run: docker compose run --rm -T --no-deps capture
 
       - name: Stage current-run artifact
         if: always()
         shell: pwsh
-        env:
-          SCREENSHOT_OUTPUT_DIR: screenshot-output
-          SCREENSHOT_ARTIFACT_DIR: screenshot-artifact
-        run: npx tsx scripts/stage-artifact.ts
+        run: docker compose run --rm -T --no-deps capture stage-artifact
 
       - name: Upload screenshot artifact
         if: always()

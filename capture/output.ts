@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { resolveManagedOutputPath, resolveSafeDeletePath } from "./paths.ts";
@@ -65,6 +65,37 @@ export async function clearManagedCaptureOutputs(outputDir: string): Promise<voi
   await rm(manifestPath, { force: true });
 }
 
+function errorCode(error: unknown): string {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return "";
+  }
+  return String((error as { code: unknown }).code);
+}
+
+/**
+ * Replace artifact contents. A normal directory is removed and recreated.
+ * A bind mount cannot be removed (EBUSY/EPERM); its entries are cleared so
+ * unrelated files still cannot remain in the uploaded artifact.
+ */
+async function resetArtifactDirectory(stagingRoot: string): Promise<void> {
+  await mkdir(stagingRoot, { recursive: true });
+  try {
+    await rm(stagingRoot, { recursive: true, force: true });
+  } catch (error) {
+    const code = errorCode(error);
+    if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
+      throw error;
+    }
+    const entries = await readdir(stagingRoot);
+    await Promise.all(
+      entries.map((entry) =>
+        rm(path.join(stagingRoot, entry), { recursive: true, force: true }),
+      ),
+    );
+  }
+  await mkdir(stagingRoot, { recursive: true });
+}
+
 /**
  * Copy only this run's manifest and generated screenshot files into artifactDir
  * so uploads cannot include unrelated files left in the output directory.
@@ -82,8 +113,7 @@ export async function stageCurrentRunArtifact(
     throw new Error("current manifest.json is missing or invalid; cannot stage artifact");
   }
 
-  await rm(stagingRoot, { recursive: true, force: true });
-  await mkdir(stagingRoot, { recursive: true });
+  await resetArtifactDirectory(stagingRoot);
 
   const staged: string[] = ["manifest.json"];
   await writeFile(path.join(stagingRoot, "manifest.json"), raw, "utf8");
