@@ -21,7 +21,7 @@ alwaysApply: true
 
 ## Runtime boundaries: Docker and .45
 
-The production target is Docker-controlled screenshot capture on .45. The current PR runs Node and Playwright directly on the runner; Docker capture is still pending and must not be described as implemented.
+Production screenshot capture on .45 runs in the Linux container from `Dockerfile` and `compose.yaml`. The Windows runner orchestrates checkout, Docker, and artifact upload. It does not install Node, npm packages, or Chromium for that job. Do not describe a live QuestForge capture or a real .45 run as done unless it was actually performed.
 
 | Component | Intended runtime |
 | --- | --- |
@@ -32,11 +32,11 @@ The production target is Docker-controlled screenshot capture on .45. The curren
 | Gallery and restricted publish endpoint | Cloudflare Worker with private R2; not a .45 Docker service |
 | Future ZIP publisher | Separate final step/container; publisher secret injected only there |
 
-- Do not require Kevin to install Node, npm packages or Chromium on .45 for production capture. Bare npm commands are optional development/fixture instructions only until Docker is implemented.
+- Production capture does not install Node, npm packages, or Chromium on .45. Bare npm commands are optional local development and fixture instructions.
 - The host requires the existing runner and working Docker Desktop with Linux containers. Do not recreate runner services or modify unrelated containers.
-- Use an official Playwright container version matching the locked Playwright package. Install dependencies inside the image/container.
-- Container localhost is not the Windows host. Configure a reachable origin (for a host-published app port, use host.docker.internal); never hardcode the real host/IP or invent app network names.
-- Pass capture configuration at runtime and mount only the required configuration/output. Do not mount the Docker socket, QuestForge source or secrets unrelated to capture.
+- The official Playwright image tag matches the locked Playwright package. `npm ci` installs dependencies inside the image. Chromium comes from that image.
+- Container localhost is the container, not the Windows host. For an app port published on the host, set `SCREENSHOT_BASE_URL` to `http://host.docker.internal:PORT`. Do not hardcode a real host or IP, and do not invent app network names.
+- Pass capture configuration at runtime. Mount only `config/` (read-only), `screenshot-output/`, and `screenshot-artifact/`. Do not mount the Docker socket, QuestForge source, or secrets unrelated to capture.
 - Capture stays manual and connects to the already-running app. Do not start, stop or rebuild QuestForge.
 - Report container fixture verification separately from live QuestForge and real .45 verification.
 - Update the relevant Linear issue with implementation, PR links, actual checks and remaining steps before handoff. Do not claim Done merely because a PR is open.

@@ -1,0 +1,26 @@
+# Capture container only. Does not start, stop, or rebuild QuestForge.
+# The .45 runner builds this image and runs one capture. No registry push.
+name: questforge-screenshot-capture
+
+services:
+  capture:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: questforge-screenshot-capture:local
+    init: true
+    shm_size: "1gb"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SCREENSHOT_BASE_URL: ${SCREENSHOT_BASE_URL:-}
+      SCREENSHOT_APP_COMMIT_SHA: ${SCREENSHOT_APP_COMMIT_SHA:-}
+      SCREENSHOT_CONFIG_DIR: /config
+      SCREENSHOT_OUTPUT_DIR: /output
+      SCREENSHOT_ARTIFACT_DIR: /artifact
+      SCREENSHOT_NAVIGATION_TIMEOUT_MS: ${SCREENSHOT_NAVIGATION_TIMEOUT_MS:-30000}
+      SCREENSHOT_READY_TIMEOUT_MS: ${SCREENSHOT_READY_TIMEOUT_MS:-15000}
+    volumes:
+      - ./config:/config:ro
+      - ./screenshot-output:/output
+      - ./screenshot-artifact:/artifact
