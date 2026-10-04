@@ -5,6 +5,8 @@ import { chromium, type Browser } from "playwright";
 
 import { joinUrl, loadScreens, loadViewports } from "./config.ts";
 import { acquireCaptureLock } from "./lock.ts";
+import { clearManagedCaptureOutputs } from "./output.ts";
+import { resolveManagedOutputPath } from "./paths.ts";
 import { disableAnimations, waitForFontsAndImages } from "./prepare-page.ts";
 import type {
   CaptureOptions,
@@ -21,6 +23,10 @@ function screenshotRelativePath(screen: ScreenConfig, viewport: ViewportConfig):
   );
 }
 
+function describeTarget(screen: ScreenConfig): string {
+  return `${screen.id} (${screen.path})`;
+}
+
 async function captureOne(
   browser: Browser,
   options: CaptureOptions,
@@ -28,8 +34,24 @@ async function captureOne(
   viewport: ViewportConfig,
 ): Promise<CaptureResult> {
   const relativeFile = screenshotRelativePath(screen, viewport);
-  const absoluteFile = path.join(options.outputDir, relativeFile);
-  const targetUrl = joinUrl(options.baseUrl, screen.path);
+  const absoluteFile = resolveManagedOutputPath(options.outputDir, relativeFile);
+  let targetUrl: string;
+
+  try {
+    targetUrl = joinUrl(options.baseUrl, screen.path);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      screenId: screen.id,
+      path: screen.path,
+      viewportId: viewport.id,
+      width: viewport.width,
+      height: viewport.height,
+      file: null,
+      status: "failed",
+      error: `${describeTarget(screen)}: ${message}`,
+    };
+  }
 
   try {
     const context = await browser.newContext({
@@ -45,7 +67,15 @@ async function captureOne(
       page.setDefaultTimeout(options.navigationTimeoutMs);
       page.setDefaultNavigationTimeout(options.navigationTimeoutMs);
 
-      await page.goto(targetUrl, { waitUntil: "networkidle" });
+      const response = await page.goto(targetUrl, { waitUntil: "networkidle" });
+      if (!response) {
+        throw new Error("navigation produced no response");
+      }
+      const status = response.status();
+      if (status >= 400) {
+        throw new Error(`HTTP ${status}`);
+      }
+
       await disableAnimations(page);
       await waitForFontsAndImages(page, options.readyTimeoutMs);
 
@@ -86,7 +116,7 @@ async function captureOne(
       height: viewport.height,
       file: null,
       status: "failed",
-      error: `${targetUrl}: ${message}`,
+      error: `${describeTarget(screen)}: ${message}`,
     };
   }
 }
@@ -94,10 +124,23 @@ async function captureOne(
 export async function runCapture(options: CaptureOptions): Promise<RunManifest> {
   const screens = await loadScreens(options.screensPath);
   const viewports = await loadViewports(options.viewportsPath);
+
+  // Validate every destination path before acquiring the lock / launching Chromium.
+  for (const screen of screens) {
+    for (const viewport of viewports) {
+      resolveManagedOutputPath(
+        options.outputDir,
+        screenshotRelativePath(screen, viewport),
+      );
+      joinUrl(options.baseUrl, screen.path);
+    }
+  }
+
   const lock = await acquireCaptureLock(options.outputDir);
 
   try {
     await mkdir(options.outputDir, { recursive: true });
+    await clearManagedCaptureOutputs(options.outputDir);
 
     const browser = await chromium.launch({ headless: true });
     const results: CaptureResult[] = [];

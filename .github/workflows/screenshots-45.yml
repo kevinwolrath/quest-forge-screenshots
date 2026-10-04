@@ -53,8 +53,11 @@ jobs:
     steps:
       - name: Require runner labels configuration
         shell: pwsh
+        env:
+          # Pass through env so JSON quotes are not interpolated into the script.
+          SCREENSHOT_RUNNER_LABELS: ${{ vars.SCREENSHOT_RUNNER_LABELS }}
         run: |
-          if ([string]::IsNullOrWhiteSpace("${{ vars.SCREENSHOT_RUNNER_LABELS }}")) {
+          if ([string]::IsNullOrWhiteSpace($env:SCREENSHOT_RUNNER_LABELS)) {
             Write-Error "Set repository variable SCREENSHOT_RUNNER_LABELS to a JSON array of .45 runner labels. See README.md."
             exit 1
           }

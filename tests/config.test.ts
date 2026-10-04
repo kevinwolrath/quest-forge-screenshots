@@ -41,6 +41,22 @@ describe("resolveCaptureOptions", () => {
     );
   });
 
+  it("does not echo malformed URL values that may contain credentials", () => {
+    const secret = "super-secret-password";
+    try {
+      resolveCaptureOptions(
+        { SCREENSHOT_BASE_URL: `http://user:${secret}@example.test:bad` },
+        "/tmp",
+      );
+      assert.fail("expected throw");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      assert.match(message, /not a valid URL/i);
+      assert.doesNotMatch(message, new RegExp(secret));
+      assert.doesNotMatch(message, /user:/);
+    }
+  });
+
   it("normalizes a valid origin and optional metadata", () => {
     const options = resolveCaptureOptions(
       {
@@ -93,6 +109,70 @@ describe("config files", () => {
     await writeFile(filePath, JSON.stringify({ screens: [{ id: "x", path: "relative" }] }));
     await assert.rejects(() => loadScreens(filePath), /root-relative path/);
   });
+
+  it("rejects protocol-relative screen paths", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "screens-"));
+    const filePath = path.join(dir, "screens.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({ screens: [{ id: "evil", path: "//other.test/" }] }),
+    );
+    await assert.rejects(() => loadScreens(filePath), /not protocol-relative/);
+  });
+
+  it("rejects screen ids that can escape the output directory", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "screens-"));
+    const filePath = path.join(dir, "screens.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({ screens: [{ id: "../outside", path: "/" }] }),
+    );
+    await assert.rejects(() => loadScreens(filePath), /filesystem-safe id/);
+  });
+
+  it("rejects duplicate screen ids", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "screens-"));
+    const filePath = path.join(dir, "screens.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        screens: [
+          { id: "home", path: "/" },
+          { id: "home", path: "/other" },
+        ],
+      }),
+    );
+    await assert.rejects(() => loadScreens(filePath), /duplicate screen id/);
+  });
+
+  it("rejects duplicate viewport ids", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "viewports-"));
+    const filePath = path.join(dir, "viewports.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        viewports: [
+          {
+            id: "desktop",
+            width: 1440,
+            height: 900,
+            deviceScaleFactor: 1,
+            isMobile: false,
+            hasTouch: false,
+          },
+          {
+            id: "desktop",
+            width: 1280,
+            height: 720,
+            deviceScaleFactor: 1,
+            isMobile: false,
+            hasTouch: false,
+          },
+        ],
+      }),
+    );
+    await assert.rejects(() => loadViewports(filePath), /duplicate viewport id/);
+  });
 });
 
 describe("joinUrl", () => {
@@ -101,6 +181,20 @@ describe("joinUrl", () => {
     assert.equal(
       joinUrl("http://example.test:3000", "/characters"),
       "http://example.test:3000/characters",
+    );
+  });
+
+  it("rejects protocol-relative paths that leave the configured origin", () => {
+    assert.throws(
+      () => joinUrl("http://example.test:3000", "//other.test/"),
+      /protocol-relative|origin/,
+    );
+  });
+
+  it("rejects credentialed resolved URLs", () => {
+    assert.throws(
+      () => joinUrl("http://example.test:3000", "//user:pass@other.test/"),
+      /credentials|protocol-relative|origin/,
     );
   });
 });

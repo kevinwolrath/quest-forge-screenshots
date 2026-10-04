@@ -9,8 +9,43 @@ import type {
   ViewportsFile,
 } from "./types.ts";
 
+const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function assertSafeId(id: string, label: string): string {
+  const trimmed = id.trim();
+  if (!SAFE_ID.test(trimmed) || trimmed.includes("..")) {
+    throw new Error(
+      `${label} must be a filesystem-safe id (letters, digits, '.', '_', '-', no '..' or path separators)`,
+    );
+  }
+  return trimmed;
+}
+
+function assertUniqueIds(ids: string[], kind: string): void {
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) {
+      throw new Error(`duplicate ${kind} id: ${id}`);
+    }
+    seen.add(id);
+  }
+}
+
+function assertScreenPath(routePath: string, label: string): string {
+  const trimmed = routePath.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) {
+    throw new Error(
+      `${label} must be a root-relative path starting with / (not protocol-relative //)`,
+    );
+  }
+  if (trimmed.includes("\\") || trimmed.includes("\0")) {
+    throw new Error(`${label} must not contain backslashes or null bytes`);
+  }
+  return trimmed;
 }
 
 function assertScreens(data: unknown): ScreenConfig[] {
@@ -23,17 +58,15 @@ function assertScreens(data: unknown): ScreenConfig[] {
     throw new Error("screens config must list at least one screen");
   }
 
-  return screens.map((screen, index) => {
+  const parsed = screens.map((screen, index) => {
     if (!screen || typeof screen !== "object") {
       throw new Error(`screens[${index}] must be an object`);
     }
     if (!isNonEmptyString(screen.id)) {
       throw new Error(`screens[${index}].id must be a non-empty string`);
     }
-    if (!isNonEmptyString(screen.path) || !screen.path.startsWith("/")) {
-      throw new Error(
-        `screens[${index}].path must be a root-relative path starting with /`,
-      );
+    if (!isNonEmptyString(screen.path)) {
+      throw new Error(`screens[${index}].path must be a non-empty string`);
     }
     if (
       screen.readySelector !== undefined &&
@@ -45,11 +78,17 @@ function assertScreens(data: unknown): ScreenConfig[] {
       );
     }
     return {
-      id: screen.id.trim(),
-      path: screen.path.trim(),
+      id: assertSafeId(screen.id, `screens[${index}].id`),
+      path: assertScreenPath(screen.path, `screens[${index}].path`),
       readySelector: screen.readySelector ?? null,
     };
   });
+
+  assertUniqueIds(
+    parsed.map((screen) => screen.id),
+    "screen",
+  );
+  return parsed;
 }
 
 function assertViewports(data: unknown): ViewportConfig[] {
@@ -66,7 +105,7 @@ function assertViewports(data: unknown): ViewportConfig[] {
     throw new Error("viewports config must list at least one viewport");
   }
 
-  return viewports.map((viewport, index) => {
+  const parsed = viewports.map((viewport, index) => {
     if (!viewport || typeof viewport !== "object") {
       throw new Error(`viewports[${index}] must be an object`);
     }
@@ -86,7 +125,7 @@ function assertViewports(data: unknown): ViewportConfig[] {
       throw new Error(`viewports[${index}].hasTouch must be a boolean`);
     }
     return {
-      id: viewport.id.trim(),
+      id: assertSafeId(viewport.id, `viewports[${index}].id`),
       width: viewport.width,
       height: viewport.height,
       deviceScaleFactor: viewport.deviceScaleFactor,
@@ -94,6 +133,12 @@ function assertViewports(data: unknown): ViewportConfig[] {
       hasTouch: viewport.hasTouch,
     };
   });
+
+  assertUniqueIds(
+    parsed.map((viewport) => viewport.id),
+    "viewport",
+  );
+  return parsed;
 }
 
 export async function loadScreens(filePath: string): Promise<ScreenConfig[]> {
@@ -121,9 +166,8 @@ export function resolveCaptureOptions(
   try {
     parsed = new URL(baseUrl);
   } catch {
-    throw new Error(
-      `SCREENSHOT_BASE_URL is not a valid URL: ${JSON.stringify(baseUrl)}`,
-    );
+    // Do not echo the supplied value; it may contain credentials.
+    throw new Error("SCREENSHOT_BASE_URL is not a valid URL.");
   }
 
   if (parsed.username || parsed.password) {
@@ -169,6 +213,32 @@ export function resolveCaptureOptions(
   };
 }
 
+/**
+ * Resolve a screen path against the configured origin.
+ * Rejects protocol-relative paths, credentialed URLs, and origin escapes.
+ */
 export function joinUrl(baseUrl: string, routePath: string): string {
-  return new URL(routePath, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
+  const safePath = assertScreenPath(routePath, "screen path");
+  let base: URL;
+  try {
+    base = new URL(baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
+  } catch {
+    throw new Error("base URL is not a valid URL.");
+  }
+
+  if (base.username || base.password) {
+    throw new Error("base URL must not include credentials");
+  }
+
+  const resolved = new URL(safePath, base);
+  if (resolved.username || resolved.password) {
+    throw new Error("resolved screen URL must not include credentials");
+  }
+  if (resolved.origin !== base.origin) {
+    throw new Error(
+      "screen path must stay on the configured SCREENSHOT_BASE_URL origin",
+    );
+  }
+
+  return resolved.toString();
 }

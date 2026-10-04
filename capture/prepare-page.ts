@@ -31,10 +31,41 @@ export async function disableAnimations(page: Page): Promise<void> {
   });
 }
 
+/**
+ * Policy for viewport screenshots: wait for incomplete images that can appear
+ * in the shot; do not wait forever for off-screen lazy images.
+ */
+export function shouldWaitForImage(
+  image: {
+    complete: boolean;
+    loading: string | null;
+    top: number;
+    left: number;
+    bottom: number;
+    right: number;
+  },
+  viewport: { width: number; height: number },
+): boolean {
+  if (image.complete) {
+    return false;
+  }
+  if (image.loading !== "lazy") {
+    return true;
+  }
+  const inViewport =
+    image.bottom > 0 &&
+    image.right > 0 &&
+    image.top < viewport.height &&
+    image.left < viewport.width;
+  return inViewport;
+}
+
 export async function waitForFontsAndImages(
   page: Page,
   timeoutMs: number,
 ): Promise<void> {
+  // Playwright signature: waitForFunction(fn, arg, options).
+  // Timeout must be the third argument; the second is callback data.
   await page.waitForFunction(
     async () => {
       if ("fonts" in document) {
@@ -42,8 +73,25 @@ export async function waitForFontsAndImages(
       }
 
       const images = Array.from(document.images);
-      return images.every((image) => image.complete);
+      return images.every((image) => {
+        if (image.complete) {
+          return true;
+        }
+        const loading = image.getAttribute("loading");
+        if (loading !== "lazy") {
+          return false;
+        }
+        const rect = image.getBoundingClientRect();
+        const inViewport =
+          rect.bottom > 0 &&
+          rect.right > 0 &&
+          rect.top < window.innerHeight &&
+          rect.left < window.innerWidth;
+        // Off-screen lazy images may never load for a non-full-page shot.
+        return !inViewport;
+      });
     },
+    undefined,
     { timeout: timeoutMs },
   );
 }
