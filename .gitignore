@@ -16,10 +16,16 @@ coverage/
 # Screenshot captures and archives
 screenshots/
 screenshot-output/
+screenshot-artifact/
 test-results/
 playwright-report/
+blob-report/
+playwright/.cache/
 *.zip
 *.har
+
+# Capture lock files if left behind outside ignored output dirs
+.capture.lock
 
 # Editor and OS files
 .DS_Store

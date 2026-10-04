@@ -9,8 +9,11 @@
 # Generated screenshots and archives
 screenshots/
 screenshot-output/
+screenshot-artifact/
 test-results/
 playwright-report/
+blob-report/
+playwright/.cache/
 *.zip
 *.har
 
