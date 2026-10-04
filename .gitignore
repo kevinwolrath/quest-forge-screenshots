@@ -1,0 +1,28 @@
+# Dependencies and generated builds
+node_modules/
+dist/
+coverage/
+.wrangler/
+
+# Local credentials and environment
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+*.pem
+*.key
+
+# Screenshot captures and archives
+screenshots/
+screenshot-output/
+test-results/
+playwright-report/
+*.zip
+*.har
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
