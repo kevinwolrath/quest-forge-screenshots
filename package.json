@@ -1,0 +1,15 @@
+{
+  "name": "quest-forge-screenshots",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone Cloudflare Worker for the private QuestForge screenshot gallery",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "wrangler": "^4.0.0"
+  }
+}
