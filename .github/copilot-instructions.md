@@ -1,0 +1,1 @@
+Follow the repository guidance in [AGENTS.md](../AGENTS.md). Keep this service separate from the QuestForge app source. Preserve the security requirements, focused scope, and verification limits documented there.
