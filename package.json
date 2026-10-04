@@ -2,14 +2,24 @@
   "name": "quest-forge-screenshots",
   "version": "0.1.0",
   "private": true,
-  "description": "Standalone Cloudflare Worker for the private QuestForge screenshot gallery",
+  "type": "module",
+  "description": "Standalone Playwright screenshot capture and Cloudflare Worker gallery for QuestForge",
   "scripts": {
-    "dev": "wrangler dev",
+    "capture": "tsx capture/cli.ts",
+    "capture:fixture": "tsx scripts/run-fixture-capture.ts",
+    "test": "tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
+    "playwright": "1.63.0",
+    "tsx": "^4.0.0",
     "typescript": "^5.0.0",
     "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

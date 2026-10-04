@@ -1,41 +1,169 @@
-# QuestForge screenshot gallery
+# QuestForge screenshots
 
-A separate Cloudflare Worker project for a private, on-demand screenshot gallery. This repository is public, so treat every committed file as public.
+Public repository for two related pieces of screenshot infrastructure:
 
-## Status
+1. **Playwright capture tool** (this README focus) — manually capture the already-running QuestForge web app through a configurable URL.
+2. **Cloudflare Worker gallery scaffold** — private gallery service (fail-closed placeholder in `src/`). Not required for local or `.45` capture.
 
-This repository is an initial scaffold. It does not contain the QuestForge application, screenshots, Cloudflare credentials, or a working gallery/publish flow. Do not deploy it until the Access gate and gallery behavior have been implemented and reviewed.
+This repository does **not** contain the QuestForge application, private assets, real screenshots, or Cloudflare credentials. Treat every committed file as public.
 
-## Intended workflow
+## Capture overview
 
-1. A person manually starts the existing screenshot workflow on `.45`.
-2. The workflow packages the complete capture as one ZIP and sends one authenticated publish request.
-3. The service validates the ZIP before replacing the single current archive in a private R2 bucket.
-4. The bookmarked Worker page is protected by Cloudflare Access, restricted to members of the Cloudflare account.
-5. The browser retrieves the current ZIP through the Worker and displays the images together.
+The capture tool opens Chromium via Playwright, visits routes from `config/screens.json` at desktop / tablet / mobile viewports from `config/viewports.json`, waits for fonts and images, disables animations where practical, and writes PNGs plus `manifest.json` under `screenshot-output/` (gitignored).
 
-Each successful publish replaces the current archive. Do not retain dated run folders, upload individual images, trigger captures on every push, or publish to LinkedIn automatically.
+Theme switching is intentionally unconfigured until QuestForge’s real theme controls are known. Captures use the application’s current appearance.
 
-## Repository boundaries
+Mobile captures use Playwright Chromium viewport emulation. They are **not** native Android device tests.
 
-- Keep this service and its deployment independent from the QuestForge app repository.
-- Do not copy QuestForge app source, local configuration, database contents, credentials, or generated screenshots into this repository.
-- Keep only the minimum screenshot names and metadata needed by the gallery. Do not commit screenshot payloads or user/account details.
+Automatic triggering after QuestForge merges is a **later integration** that needs access to the QuestForge repository. It is **not** implemented here and is not a blocker for manual capture.
 
-## Security and secrets
+## Installation
 
-Assume all tracked content and Git history are public. Never commit Cloudflare account/admin tokens, R2 credentials, publisher credentials, `.env` files, `.dev.vars`, or real screenshots.
+```bash
+npm install
+npx playwright install chromium
+cp .env.example .env
+```
 
-Cloudflare Access viewer sign-in and the screenshot publisher credential are separate controls. Use Cloudflare Access with the Cloudflare identity provider and account-member restriction; do not add email PIN or a separate email allowlist. Keep R2 private and serve content only through the authenticated Worker.
+Edit `.env` and set `SCREENSHOT_BASE_URL` to the credential-free origin of the running app (scheme + host[+port], no path, no username/password). Do not commit `.env`.
 
-The future publisher credential belongs in GitHub Actions Secrets and should be passed only to the publish step/container at runtime. It must not be stored on `.45`, in Git, or in logs. Rotate it if it is ever exposed.
+## Configuration
 
-## Development
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `SCREENSHOT_BASE_URL` | Yes | Application origin only. No hardcoded host lives in tracked files. |
+| `SCREENSHOT_APP_COMMIT_SHA` | No | Optional metadata recorded in the manifest. **Not verified.** |
+| `SCREENSHOT_CONFIG_DIR` | No | Defaults to `config`. |
+| `SCREENSHOT_OUTPUT_DIR` | No | Defaults to `screenshot-output`. |
+| `SCREENSHOT_NAVIGATION_TIMEOUT_MS` | No | Defaults to `30000`. |
+| `SCREENSHOT_READY_TIMEOUT_MS` | No | Defaults to `15000`. |
 
-The Worker source and tests will live in this repository. Keep local runtime files out of Git with `.gitignore` and keep secrets and generated captures out of AI indexing with `.cursorignore`.
+### Screens (`config/screens.json`)
 
-The first implementation should add focused tests for access control, ZIP validation, overwrite behavior, and failure recovery. Do not claim Cloudflare account setup or deployment has been verified unless it was actually performed.
+Start with `/` only. Add more screens by appending objects; capture code does not need changes.
 
-## Deployment
+```json
+{
+  "screens": [
+    {
+      "id": "home",
+      "path": "/",
+      "readySelector": null
+    }
+  ]
+}
+```
 
-Deploy from this repository using Cloudflare's Git integration after reviewing the Access policy and confirming R2 is private. Do not add an automatic screenshot-capture trigger to app pushes. Cloudflare account/admin credentials must not be added to GitHub Actions or the `.45` runner.
+Optional per-screen `readySelector` waits for a visible CSS selector before the screenshot.
+
+Do not invent QuestForge routes or selectors here until they are known from the live app.
+
+### Viewports (`config/viewports.json`)
+
+| id | width × height | notes |
+| --- | ---: | --- |
+| `desktop` | 1440 × 900 | mouse, no touch |
+| `tablet` | 768 × 1024 | mobile + touch |
+| `mobile` | 390 × 844 | mobile + touch |
+
+All presets use `deviceScaleFactor: 1`. Edit the JSON to change dimensions without changing capture code.
+
+## Local capture (real app)
+
+With QuestForge already running and reachable:
+
+```bash
+export SCREENSHOT_BASE_URL="http://HOST:PORT"   # your running app origin
+# optional:
+# export SCREENSHOT_APP_COMMIT_SHA="<sha>"
+npm run capture
+```
+
+Or load values from `.env` in your shell before running. Output:
+
+- `screenshot-output/<screen>/<viewport>-<w>x<h>.png`
+- `screenshot-output/manifest.json` (URL, timestamp, viewports, routes, results, optional SHA)
+
+Concurrent captures that target the same output directory are blocked by `.capture.lock`.
+
+## Fixture verification (not QuestForge)
+
+When the real application URL is unavailable, verify the tool against the local HTML fixture:
+
+```bash
+npm test
+npm run capture:fixture
+```
+
+Passing fixture checks means the capture pipeline works. It does **not** mean QuestForge was captured or verified.
+
+## GitHub Actions on `.45`
+
+Workflow: [`.github/workflows/screenshots-45.yml`](.github/workflows/screenshots-45.yml)
+
+- Trigger: **manual** `workflow_dispatch` only
+- No `pull_request` / `push` triggers (public PR code must not run on `.45`)
+- Does not start, stop, or alter QuestForge, containers, or unrelated processes
+- Concurrency group `screenshots-45` prevents overlapping capture jobs
+- Uploads `screenshot-output/` as an Actions artifact with **30-day** retention (or shorter if the repository artifact retention setting is lower)
+
+### Runner labels (you must set these)
+
+Set repository variable **`SCREENSHOT_RUNNER_LABELS`**:
+
+1. Open this repo on GitHub → **Settings** → **Secrets and variables** → **Actions** → **Variables**
+2. Create `SCREENSHOT_RUNNER_LABELS` as a JSON array of the labels on your `.45` screenshot runner
+
+Example shape (replace with your actual labels):
+
+```json
+["self-hosted","Windows","X64","questforge-screenshots"]
+```
+
+If the variable is missing, the workflow fails closed instead of scheduling onto a random runner.
+
+### Secrets / inputs
+
+| Name | Where | Purpose |
+| --- | --- | --- |
+| `SCREENSHOT_BASE_URL` | Actions secret | Credential-free origin of the already-running QuestForge app |
+| `SCREENSHOT_APP_COMMIT_SHA` | Optional secret or variable | Default metadata SHA for the manifest |
+| `base_url_override` | Workflow input | One-off origin override for a single run |
+| `app_commit_sha` | Workflow input | One-off metadata SHA for a single run |
+
+### Manual workflow execution
+
+1. Ensure QuestForge is already running where `.45` can reach it.
+2. Confirm `SCREENSHOT_RUNNER_LABELS` and `SCREENSHOT_BASE_URL` are set.
+3. Actions → **Screenshots on 45** → **Run workflow**.
+4. Optionally supply `app_commit_sha` and/or `base_url_override`.
+
+### Artifact downloads
+
+1. Open the completed workflow run.
+2. Download artifact `questforge-screenshots-<run_id>.<attempt>`.
+3. Extract to inspect PNGs and `manifest.json`.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| `SCREENSHOT_BASE_URL is required` | Export the variable or copy `.env.example` → `.env` and load it. |
+| `must not include credentials` | Use a credential-free origin. |
+| Navigation / timeout failures | Confirm the app is up from the capture host; raise `SCREENSHOT_NAVIGATION_TIMEOUT_MS` / `SCREENSHOT_READY_TIMEOUT_MS` if needed. |
+| Ready selector timeout | Fix or clear `readySelector` for that screen; do not invent selectors. |
+| Lock errors | Another capture holds `screenshot-output/.capture.lock`. Wait, or remove only if no capture is running. |
+| Workflow: runner labels not configured | Set `SCREENSHOT_RUNNER_LABELS` as documented above. |
+| Workflow cannot reach the app | `.45` must resolve `SCREENSHOT_BASE_URL` on your LAN; this tool will not start the app. |
+| Fixture passes but real capture fails | Expected distinction: fixture ≠ QuestForge verification. |
+
+## Gallery Worker scaffold
+
+`src/`, `wrangler.jsonc`, and related docs describe the future Access-protected gallery. Capture does not depend on deploying the Worker. Do not claim Cloudflare setup or deployment was verified unless it was actually performed.
+
+## Security
+
+- Never commit `.env`, secrets, tokens, personal data, or generated screenshots.
+- Keep URLs with credentials out of Git and logs.
+- Publisher / Cloudflare credentials (for a future gallery publish step) stay separate from capture and must not be stored on `.45`.
+- Keep generated output out of Git via `.gitignore` / `.cursorignore`.

@@ -11,6 +11,8 @@ screenshots/
 screenshot-output/
 test-results/
 playwright-report/
+blob-report/
+playwright/.cache/
 *.zip
 *.har
 

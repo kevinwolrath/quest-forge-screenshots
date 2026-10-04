@@ -1,0 +1,10 @@
+{
+  "screens": [
+    {
+      "id": "home",
+      "path": "/",
+      "readySelector": null
+    }
+  ]
+}
+

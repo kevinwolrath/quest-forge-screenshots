@@ -1,18 +1,20 @@
 ---
-description: Security and scope rules for the standalone screenshot gallery service
+description: Security and scope rules for the standalone screenshot capture and gallery service
 alwaysApply: true
 ---
 
 # Screenshot gallery rules
 
 - Follow the repository-wide instructions in `AGENTS.md`.
-- This repository is a standalone Cloudflare Worker service. Do not add or copy QuestForge application source, database contents, or real screenshots.
+- This repository is standalone screenshot infrastructure (Playwright capture + Cloudflare Worker gallery scaffold). Do not add or copy QuestForge application source, database contents, or real screenshots.
 - Treat committed content and Git history as public. Never commit credentials, tokens, keys, `.env` files, or screenshot archives.
+- Capture uses configurable `SCREENSHOT_BASE_URL` only. Do not hardcode IPs/hostnames. Do not invent QuestForge routes, selectors, or theme controls.
 - Keep R2 private and require Cloudflare Access for every viewer route and archive response. Fail closed on missing or invalid identity.
 - Do not add email PIN or a separate viewer email allowlist.
 - Keep publisher authentication separate from viewer authentication. Inject the dedicated publisher secret only into the publish step/container at runtime; never persist it on .45 or print it.
 - Accept one validated ZIP per publish and replace the single current archive only after full validation. A failed publish must preserve the previous archive.
-- Keep capture manual/on demand. Do not add capture on pushes or automatic LinkedIn publishing.
+- Keep capture manual/on demand. Do not add capture on pushes, public PR execution on `.45`, or automatic LinkedIn publishing.
+- Capture jobs must not start, stop, or alter QuestForge or unrelated processes.
 - Make the smallest scoped change. Read existing code and tests first; do not introduce extra frameworks or speculative abstractions.
-- Run focused tests and report exact commands/results. Do not run screenshot capture, Playwright, Android, or device tests unless requested.
+- Run focused tests and report exact commands/results. Fixture verification is not QuestForge verification. Do not run live QuestForge capture, Android, or device tests unless requested.
 - Do not claim Cloudflare account setup or deployment was verified unless it actually was.

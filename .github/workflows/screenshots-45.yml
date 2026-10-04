@@ -1,0 +1,117 @@
+# Manual screenshot capture on Kevin's Windows home PC (.45).
+#
+# This workflow does not start, stop, or alter QuestForge or unrelated processes.
+# It only checks out this repository and captures the URL you configure.
+#
+# Public-repo safety:
+# - workflow_dispatch only (no pull_request / push triggers)
+# - Does not run untrusted PR code on .45
+# - Automatic capture after QuestForge merges is NOT implemented here
+#
+# Required configuration before the first real run:
+# 1. Repository variable SCREENSHOT_RUNNER_LABELS
+#    JSON array of GitHub Actions runner labels that select the .45 screenshot lane.
+#    Example shape (replace with your actual labels):
+#      ["self-hosted","Windows","X64","questforge-screenshots"]
+#    Set at: Repo → Settings → Secrets and variables → Actions → Variables
+# 2. Repository secret SCREENSHOT_BASE_URL
+#    Credential-free origin of the already-running QuestForge web app on the LAN,
+#    for example http://HOST:PORT (no path, no username/password).
+# 3. Optional secret or variable SCREENSHOT_APP_COMMIT_SHA
+#    Recorded in the manifest as metadata only; not verified.
+
+name: Screenshots on 45
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_commit_sha:
+        description: Optional QuestForge commit SHA metadata (not verified)
+        required: false
+        type: string
+      base_url_override:
+        description: Optional one-off SCREENSHOT_BASE_URL override (credential-free origin)
+        required: false
+        type: string
+
+concurrency:
+  group: screenshots-45
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: Capture screenshots
+    # Configure SCREENSHOT_RUNNER_LABELS before relying on .45.
+    # The fallback below is intentionally invalid so a missing variable fails closed
+    # instead of scheduling onto a random runner.
+    runs-on: ${{ fromJSON(vars.SCREENSHOT_RUNNER_LABELS || '["screenshot-runner-labels-not-configured"]') }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Require runner labels configuration
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace("${{ vars.SCREENSHOT_RUNNER_LABELS }}")) {
+            Write-Error "Set repository variable SCREENSHOT_RUNNER_LABELS to a JSON array of .45 runner labels. See README.md."
+            exit 1
+          }
+
+      - name: Resolve base URL
+        id: base_url
+        shell: pwsh
+        env:
+          INPUT_BASE_URL: ${{ inputs.base_url_override }}
+          SECRET_BASE_URL: ${{ secrets.SCREENSHOT_BASE_URL }}
+        run: |
+          $value = $env:INPUT_BASE_URL
+          if ([string]::IsNullOrWhiteSpace($value)) {
+            $value = $env:SECRET_BASE_URL
+          }
+          if ([string]::IsNullOrWhiteSpace($value)) {
+            Write-Error "Set secret SCREENSHOT_BASE_URL or pass base_url_override."
+            exit 1
+          }
+          if ($value -match "@") {
+            Write-Error "SCREENSHOT_BASE_URL must not include credentials."
+            exit 1
+          }
+          Write-Host "::add-mask::$value"
+          "value=$value" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Check out screenshot tooling
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        shell: pwsh
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        shell: pwsh
+        run: npx playwright install chromium
+
+      - name: Capture screenshots
+        shell: pwsh
+        env:
+          SCREENSHOT_BASE_URL: ${{ steps.base_url.outputs.value }}
+          SCREENSHOT_OUTPUT_DIR: screenshot-output
+          SCREENSHOT_APP_COMMIT_SHA: ${{ inputs.app_commit_sha || secrets.SCREENSHOT_APP_COMMIT_SHA || vars.SCREENSHOT_APP_COMMIT_SHA }}
+        run: npm run capture
+
+      - name: Upload screenshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: questforge-screenshots-${{ github.run_id }}.${{ github.run_attempt }}
+          path: screenshot-output/
+          if-no-files-found: warn
+          # Retention is 30 days unless the repository artifact retention setting is shorter.
+          retention-days: 30
