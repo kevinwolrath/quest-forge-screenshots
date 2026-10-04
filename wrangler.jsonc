@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "quest-forge-screenshots",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-04",
+  "workers_dev": true,
+  "preview_urls": false,
+  "r2_buckets": [
+    {
+      "binding": "SCREENSHOTS",
+      "bucket_name": "quest-forge-screenshots"
+    }
+  ]
+}
