@@ -59,6 +59,13 @@ describe("gallery browser", () => {
       await page.setViewportSize({ width: 1280, height: 800 });
       const response = await page.goto(server.baseUrl + "/", { waitUntil: "networkidle" });
       assert.equal(response?.status(), 200);
+      assert.equal(await page.locator("h1").innerText(), "QuestForge Screenshot Gallery");
+      assert.equal(
+        await page.locator(".tagline").innerText(),
+        "Latest previews across themes and screen sizes.",
+      );
+      const headerBox = await page.locator(".site-header").boundingBox();
+      assert.ok(headerBox && headerBox.width > 1000);
       await page.waitForSelector("figcaption");
       const captions = await page.locator("figcaption").allTextContents();
       assert.deepEqual(captions, ["home · desktop", "home · mobile"]);
@@ -70,6 +77,13 @@ describe("gallery browser", () => {
       const fullBox = await page.locator("#full").boundingBox();
       assert.ok(fullBox && fullBox.width > 200);
 
+      await page.setViewportSize({ width: 768, height: 1024 });
+      await page.reload({ waitUntil: "networkidle" });
+      await page.waitForSelector("figcaption");
+      const tabletHeader = await page.locator(".site-header").boundingBox();
+      assert.ok(tabletHeader && tabletHeader.width <= 768 && tabletHeader.width > 700);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
+
       await page.setViewportSize({ width: 390, height: 844 });
       await page.reload({ waitUntil: "networkidle" });
       await page.waitForSelector("figcaption");
@@ -77,6 +91,9 @@ describe("gallery browser", () => {
       assert.deepEqual(mobileCaptions, ["home · desktop", "home · mobile"]);
       const card = await page.locator("figure img").first().boundingBox();
       assert.ok(card && card.width > 100 && card.width < 390);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
+      const mobileTitle = await page.locator("h1").boundingBox();
+      assert.ok(mobileTitle && mobileTitle.width < 390);
     } finally {
       await browser?.close();
       await server.close();
