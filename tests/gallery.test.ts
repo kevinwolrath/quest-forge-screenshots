@@ -66,9 +66,11 @@ describe("fail-closed gallery routes", () => {
     const page = await handleRequest(viewer("/"), bindings(bucket), allowTestToken);
     assert.equal(page.status, 200);
     const html = await page.text();
-    assert.match(html, /QuestForge screenshots/);
+    assert.match(html, /QuestForge Screenshot Gallery/);
+    assert.match(html, /Latest previews across themes and screen sizes/);
     assert.match(html, /grid-template-columns/);
     assert.match(html, /@media \(max-width: 640px\)/);
+    assert.match(html, /--gold:/);
     assert.equal(html.includes("innerHTML"), false);
     assert.equal(html.includes(Buffer.from(PNG).toString("base64")), false);
 
