@@ -1,5 +1,5 @@
-# Capture container only. Does not start, stop, or rebuild QuestForge.
-# The .45 runner builds this image and runs one capture. No registry push.
+# Retained capture container. This repository does not schedule it.
+# QuestForge owns screenshot capture on .45. No registry push.
 name: questforge-screenshot-capture
 
 services:

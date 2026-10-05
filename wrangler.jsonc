@@ -5,6 +5,9 @@
   "compatibility_date": "2026-10-04",
   "workers_dev": true,
   "preview_urls": false,
+  // Private R2 only. Do not enable public bucket access or an r2.dev URL.
+  // ACCESS_TEAM_DOMAIN, ACCESS_AUD, and PUBLISH_SECRET are set at deploy time.
+  // Missing Access settings fail closed. This file does not deploy anything.
   "r2_buckets": [
     {
       "binding": "SCREENSHOTS",

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -61,25 +61,23 @@ describe("docker capture runtime", () => {
     assert.equal(compose.toLowerCase().includes("cloudflare"), false);
   });
 
-  it("runs capture through Docker and keeps hosted label validation", async () => {
-    const workflow = await readRepoFile(".github/workflows/screenshots-45.yml");
-    assert.match(workflow, /^on:\n {2}workflow_dispatch:/m);
-    assert.doesNotMatch(workflow, /^\s{2}(push|pull_request|schedule|workflow_run):/m);
-    assert.match(workflow, /runs-on: ubuntu-latest/);
-    assert.match(workflow, /node scripts\/validate-runner-labels\.mjs/);
-    assert.match(workflow, /fromJSON\(needs\.validate-config\.outputs\.runner_labels\)/);
-    assert.match(workflow, /docker compose build capture/);
-    assert.match(workflow, /docker compose run --rm -T --no-deps capture$/m);
-    assert.match(workflow, /docker compose run --rm -T --no-deps capture stage-artifact/);
-    assert.match(workflow, /actions\/upload-artifact@v4/);
-    assert.match(workflow, /path: screenshot-artifact\//);
-    assert.match(workflow, /retention-days: 30/);
-    assert.match(workflow, /if-no-files-found: warn/);
-    assert.match(workflow, /group: screenshots-45/);
-    assert.equal(workflow.includes("actions/setup-node"), false);
-    assert.equal(workflow.includes("playwright install"), false);
-    assert.equal(workflow.includes("npm ci"), false);
-    assert.equal(workflow.includes("docker.sock"), false);
-    assert.equal((workflow.match(/if: always\(\)/g) || []).length, 2);
+  it("does not ship a workflow that can queue capture jobs", async () => {
+    const workflowsDir = path.join(root, ".github/workflows");
+    let entries: string[] = [];
+    try {
+      entries = await readdir(workflowsDir);
+    } catch (error) {
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? String((error as { code: unknown }).code)
+          : "";
+      if (code !== "ENOENT") throw error;
+    }
+    const workflows = entries.filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
+    assert.deepEqual(workflows, []);
+    const retired = await readRepoFile("docs/retired-capture-workflow.md");
+    assert.match(retired, /not scheduled/);
+    assert.equal(retired.includes("workflow_dispatch:"), false);
+    assert.equal(retired.includes("runs-on:"), false);
   });
 });

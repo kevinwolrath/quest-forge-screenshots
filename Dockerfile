@@ -1,3 +1,5 @@
+# Retained capture image from the merged standalone experiment.
+# This repository does not schedule it. QuestForge owns screenshot capture.
 # Official Playwright image. The tag matches the locked playwright version
 # in package-lock.json (enforced by tests/docker-runtime.test.ts).
 # Node 24 in this image satisfies package.json engines (>=22).

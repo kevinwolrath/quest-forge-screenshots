@@ -3,11 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Standalone Playwright screenshot capture and Cloudflare Worker gallery for QuestForge",
+  "description": "Private Cloudflare screenshot gallery and publisher for QuestForge",
   "scripts": {
     "capture": "tsx capture/cli.ts",
     "capture:fixture": "tsx scripts/run-fixture-capture.ts",
     "capture:docker-fixture": "tsx scripts/verify-docker-capture.ts",
+    "publish:archive": "tsx publisher/cli.ts",
     "stage-artifact": "tsx scripts/stage-artifact.ts",
     "test": "tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",

@@ -1,6 +1,6 @@
 /**
- * Fail-fast validation for SCREENSHOT_RUNNER_LABELS.
- * Intended to run on a GitHub-hosted runner before any .45 job is queued.
+ * Retained parser from the retired capture workflow.
+ * Nothing in this repository schedules a runner with it.
  * No dependencies; safe for `node scripts/validate-runner-labels.mjs`.
  */
 
