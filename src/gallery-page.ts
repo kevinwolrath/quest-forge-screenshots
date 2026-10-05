@@ -34,8 +34,8 @@ const PAGE_STYLE = `
     flex-direction: column;
     align-items: center;
     text-align: center;
-    gap: 12px;
-    padding: 36px 24px 28px;
+    gap: 14px;
+    padding: 40px 24px 32px;
     border-bottom: 1px solid var(--border);
     background: linear-gradient(180deg, rgba(28, 25, 22, 0.96) 0%, rgba(18, 16, 14, 0.92) 100%);
   }
@@ -51,12 +51,13 @@ const PAGE_STYLE = `
   }
   .site-header h1 {
     margin: 0;
-    max-width: 22ch;
+    max-width: 28rem;
+    padding: 0 8px;
     font-family: Georgia, "Palatino Linotype", "Book Antiqua", Palatino, serif;
     font-size: clamp(1.45rem, 3.4vw, 2rem);
     font-weight: 700;
     letter-spacing: 0.01em;
-    line-height: 1.2;
+    line-height: 1.25;
     color: var(--ink);
     text-wrap: balance;
   }
@@ -92,6 +93,7 @@ const PAGE_STYLE = `
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 18px;
     align-items: stretch;
+    justify-content: center;
     padding: 20px 24px 40px;
     width: 100%;
     max-width: 1400px;
@@ -195,7 +197,7 @@ const PAGE_STYLE = `
     color: var(--ink-muted);
   }
   @media (max-width: 900px) {
-    .site-header { padding: 28px 18px 22px; gap: 10px; }
+    .site-header { padding: 32px 18px 24px; gap: 12px; }
     .brand-mark { width: 64px; height: 64px; border-radius: 12px; }
     .grid {
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -204,9 +206,9 @@ const PAGE_STYLE = `
     }
   }
   @media (max-width: 640px) {
-    .site-header { padding: 22px 14px 18px; gap: 8px; }
+    .site-header { padding: 26px 16px 20px; gap: 10px; }
     .brand-mark { width: 56px; height: 56px; border-radius: 11px; }
-    .site-header h1 { font-size: 1.28rem; max-width: 16ch; }
+    .site-header h1 { font-size: 1.35rem; }
     .tagline { font-size: 0.92rem; padding: 0 4px; }
     .status:not([hidden]) { margin: 12px 12px 0; }
     .grid {
