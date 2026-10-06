@@ -8,6 +8,10 @@
   // Private R2 only. Do not enable public bucket access or an r2.dev URL.
   // ACCESS_TEAM_DOMAIN, ACCESS_AUD, and PUBLISH_SECRET are set at deploy time.
   // Missing Access settings fail closed. This file does not deploy anything.
+  "vars": {
+  "ACCESS_TEAM_DOMAIN": "ancient-wildflower-d31c.cloudflareaccess.com",
+  "ACCESS_AUD": "0357bc74b152c6f020f500cf11e590ad0654214a54a9657b685ff58835919646"
+  },
   "r2_buckets": [
     {
       "binding": "SCREENSHOTS",
