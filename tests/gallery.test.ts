@@ -71,6 +71,12 @@ describe("fail-closed gallery routes", () => {
     assert.match(html, /grid-template-columns/);
     assert.match(html, /@media \(max-width: 640px\)/);
     assert.match(html, /--gold:/);
+    assert.match(html, /aria-label="Close image"/);
+    assert.match(html, /aria-label="Previous image"/);
+    assert.match(html, /aria-label="Next image"/);
+    assert.match(html, /id="prev"/);
+    assert.match(html, /id="next"/);
+    assert.match(html, /title="Full size"/);
     assert.equal(html.includes("innerHTML"), false);
     assert.equal(html.includes(Buffer.from(PNG).toString("base64")), false);
 

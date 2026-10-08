@@ -1,21 +1,37 @@
 import type { ArchiveLimits } from "./limits.ts";
 
+export type GalleryEvent = {
+  key?: string;
+  preventDefault?: () => void;
+  target?: GalleryNode | null;
+};
+
 export type GalleryNode = {
   textContent: string;
   hidden: boolean;
   src: string;
   alt: string;
   type: string;
+  disabled: boolean;
+  scrollTop: number;
+  scrollLeft: number;
+  classList: {
+    add(token: string): void;
+    remove(token: string): void;
+    contains(token: string): boolean;
+  };
   append(child: GalleryNode): void;
   setAttribute(name: string, value: string): void;
-  addEventListener(type: string, listener: () => void): void;
+  addEventListener(type: string, listener: (event?: GalleryEvent) => void): void;
   showModal(): void;
   close(): void;
+  focus(options?: { preventScroll?: boolean }): void;
 };
 
 export type GalleryDom = {
   getElementById(id: string): GalleryNode | null;
   createElement(tag: string): GalleryNode;
+  activeElement: GalleryNode | null;
 };
 
 type FetchLike = (url: string) => Promise<{
@@ -40,7 +56,9 @@ export async function startGallery(
   const full = doc.getElementById("full");
   const fullLabel = doc.getElementById("full-label");
   const close = doc.getElementById("close");
-  if (!when || !status || !grid || !viewer || !full || !fullLabel || !close) return;
+  const prev = doc.getElementById("prev");
+  const next = doc.getElementById("next");
+  if (!when || !status || !grid || !viewer || !full || !fullLabel || !close || !prev || !next) return;
 
   const showStatus = (message: string) => {
     status.hidden = false;
@@ -289,6 +307,53 @@ export async function startGallery(
   }
   status.hidden = true;
   status.textContent = "";
+
+  const slides: { src: string; caption: string }[] = [];
+  let index = 0;
+  let opener: GalleryNode | null = null;
+  let savedScroll = 0;
+  let actualSize = false;
+
+  const applySize = () => {
+    if (actualSize) viewer.classList.add("is-actual");
+    else viewer.classList.remove("is-actual");
+    full.setAttribute("aria-pressed", actualSize ? "true" : "false");
+    full.setAttribute("title", actualSize ? "Fit to page" : "Full size");
+    viewer.scrollTop = 0;
+    viewer.scrollLeft = 0;
+  };
+
+  const toggleSize = () => {
+    actualSize = !actualSize;
+    applySize();
+  };
+
+  const readScroll = () => (typeof globalThis.scrollY === "number" ? globalThis.scrollY : 0);
+  const restoreScroll = (y: number) => {
+    const scrollTo = globalThis.scrollTo;
+    if (typeof scrollTo === "function") scrollTo(0, y);
+  };
+
+  const showAt = (nextIndex: number) => {
+    if (nextIndex < 0 || nextIndex >= slides.length) return;
+    const slide = slides[nextIndex];
+    if (!slide) return;
+    index = nextIndex;
+    full.src = slide.src;
+    full.alt = slide.caption;
+    fullLabel.textContent = slide.caption;
+    const atStart = index === 0;
+    const atEnd = index === slides.length - 1;
+    const active = doc.activeElement;
+    if ((atStart && active === prev) || (atEnd && active === next)) close.focus({ preventScroll: true });
+    prev.disabled = atStart;
+    next.disabled = atEnd;
+  };
+
+  const move = (delta: number) => {
+    showAt(index + delta);
+  };
+
   for (const image of unpacked.images) {
     const figure = doc.createElement("figure");
     const button = doc.createElement("button");
@@ -304,16 +369,63 @@ export async function startGallery(
     figcaption.textContent = caption;
     button.append(img);
     button.append(figcaption);
+    const slideIndex = slides.length;
+    slides.push({ src: img.src, caption });
     button.addEventListener("click", () => {
-      full.src = img.src;
-      full.alt = caption;
-      fullLabel.textContent = caption;
+      opener = button;
+      savedScroll = readScroll();
+      actualSize = false;
+      applySize();
+      showAt(slideIndex);
       viewer.showModal();
+      close.focus({ preventScroll: true });
     });
     figure.append(button);
     grid.append(figure);
   }
+
+  prev.addEventListener("click", () => {
+    if (prev.disabled) return;
+    move(-1);
+  });
+  next.addEventListener("click", () => {
+    if (next.disabled) return;
+    move(1);
+  });
   close.addEventListener("click", () => {
     viewer.close();
+  });
+  viewer.addEventListener("click", (event) => {
+    const target = event?.target;
+    if (target === close || target === prev || target === next) return;
+    toggleSize();
+  });
+  full.addEventListener("keydown", (event) => {
+    const key = event?.key;
+    if (key !== "Enter" && key !== " ") return;
+    event?.preventDefault?.();
+    toggleSize();
+  });
+  viewer.addEventListener("keydown", (event) => {
+    const key = event?.key;
+    if (key === "ArrowLeft") {
+      event?.preventDefault?.();
+      if (!prev.disabled) move(-1);
+    } else if (key === "ArrowRight") {
+      event?.preventDefault?.();
+      if (!next.disabled) move(1);
+    }
+  });
+  viewer.addEventListener("close", () => {
+    const target = opener;
+    const y = savedScroll;
+    opener = null;
+    const finish = () => {
+      target?.focus({ preventScroll: true });
+      restoreScroll(y);
+    };
+    const schedule = globalThis.requestAnimationFrame;
+    if (typeof schedule === "function") schedule(() => schedule(finish));
+    else finish();
   });
 }
