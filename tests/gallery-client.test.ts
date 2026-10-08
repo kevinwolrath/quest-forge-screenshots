@@ -10,6 +10,7 @@ import { galleryZip, PNG } from "./gallery-fixtures.ts";
 class FakeNode implements GalleryNode {
   textContent = "";
   hidden = false;
+  value = "";
   src = "";
   alt = "";
   type = "";
@@ -35,11 +36,19 @@ class FakeNode implements GalleryNode {
     this.dom = dom;
   }
 
+  attributes = new Map<string, string>();
+
   append(child: GalleryNode): void {
-    this.children.push(child as FakeNode);
+    this.children.push(child as unknown as FakeNode);
   }
 
-  setAttribute(): void {}
+  replaceChildren(): void {
+    this.children = [];
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes.set(name, value);
+  }
 
   addEventListener(type: string, listener: (event?: GalleryEvent) => void): void {
     const list = this.listeners.get(type) ?? [];
@@ -75,7 +84,7 @@ class FakeDom {
   activeElement: FakeNode | null = null;
 
   constructor() {
-    for (const id of ["when", "status", "grid", "viewer", "full", "full-label", "close", "prev", "next"]) {
+    for (const id of ["when", "status", "grid", "viewer", "full", "full-label", "close", "prev", "next", "view", "merge-details", "merge-title", "merge-meta"]) {
       const node = new FakeNode();
       node.attach(this);
       this.nodes.set(id, node);
@@ -97,14 +106,28 @@ class FakeDom {
   }
 }
 
+function zipResponse(zip: Uint8Array) {
+  return {
+    ok: true,
+    status: 200,
+    arrayBuffer: async () => zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength) as ArrayBuffer,
+  };
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  const bytes = new TextEncoder().encode(JSON.stringify(body));
+  return { ok: status === 200, status, arrayBuffer: async () => bytes.buffer.slice(0) as ArrayBuffer };
+}
+
 describe("flat gallery client", () => {
   it("unpacks one zip into a labeled grid and opens an image", async () => {
     const dom = new FakeDom();
-    let calls = 0;
+    const calls: string[] = [];
     await startGallery(
       dom,
       async (url) => {
-        calls += 1;
+        calls.push(url);
+        if (url === "/api/merges") return jsonResponse({ merges: [] });
         assert.equal(url, "/archive");
         const zip = galleryZip([
           { file: "images/home-desktop.png", screen: "home", viewport: "desktop", bytes: PNG },
@@ -119,7 +142,7 @@ describe("flat gallery client", () => {
       },
       LIMITS,
     );
-    assert.equal(calls, 1);
+    assert.deepEqual(calls, ["/archive", "/api/merges"]);
     assert.equal(dom.nodes.get("when")?.textContent, "2026-10-04T12:00:00.000Z");
     assert.equal(dom.nodes.get("status")?.hidden, true);
     const grid = dom.nodes.get("grid");
@@ -226,6 +249,7 @@ describe("flat gallery client", () => {
     const sandbox = {
       document: dom,
       fetch: async (url: string) => {
+        if (url === "/api/merges") return jsonResponse({ merges: [] });
         assert.equal(url, "/archive");
         return {
           ok: true,
@@ -255,5 +279,143 @@ describe("flat gallery client", () => {
     dom.nodes.get("close")?.click();
     assert.equal(dom.nodes.get("viewer")?.open, false);
     assert.equal(dom.activeElement, dom.nodes.get("grid")?.children[0]?.children[0]);
+  });
+
+  it("switches between the develop gallery and the last merges, showing only the merge's screens", async () => {
+    const A = "pr-12-0123456789ab";
+    const B = "pr-11-ba9876543210";
+    const merge = (id: string, number: number, title: string) => ({
+      id,
+      kind: "merge",
+      pr: { number, title },
+      mergeCommit: id.slice(-12) + "c".repeat(28),
+      mergedAt: "2026-10-08T09:00:00Z",
+      screens: ["c03-characters"],
+      viewports: ["desktop"],
+      generatedAt: "2026-10-08T09:10:00.000Z",
+      images: 1,
+    });
+    const develop = galleryZip([
+      { file: "images/home-desktop.png", screen: "home", viewport: "desktop", bytes: PNG },
+      { file: "images/home-mobile.png", screen: "home", viewport: "mobile", bytes: PNG },
+    ]);
+    const snapshot = (id: string) =>
+      galleryZip([{ file: "images/c03-characters-desktop.png", screen: "c03-characters", viewport: "desktop 1440x900", bytes: PNG }], {
+        snapshot: { id },
+      });
+    let pending: ((value: ReturnType<typeof zipResponse>) => void) | null = null;
+    const calls: string[] = [];
+    const dom = new FakeDom();
+    await startGallery(
+      dom,
+      async (url) => {
+        calls.push(url);
+        if (url === "/archive") return zipResponse(develop);
+        if (url === "/api/merges") {
+          return jsonResponse({ merges: [merge(A, 12, "Change twelve"), { id: "../etc", pr: { number: 1, title: "bad" } }, merge(B, 11, "Change eleven")] });
+        }
+        if (url === `/merges/${A}/archive`) return zipResponse(snapshot(A));
+        if (url === `/merges/${B}/archive`) return new Promise((resolve) => (pending = resolve));
+        return jsonResponse({}, 404);
+      },
+      LIMITS,
+    );
+    const view = dom.nodes.get("view")!;
+    const grid = dom.nodes.get("grid")!;
+    const details = dom.nodes.get("merge-details")!;
+    const group = view.children[0]!;
+    assert.equal(group.attributes.get("label"), "Last 10 merges");
+    assert.deepEqual(
+      group.children.map((option) => [option.value, option.textContent]),
+      [
+        [A, "#12 · Change twelve"],
+        [B, "#11 · Change eleven"],
+      ],
+    );
+    assert.equal(grid.children.length, 2);
+
+    view.value = A;
+    view.emit("change");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(details.hidden, false);
+    assert.equal(dom.nodes.get("merge-title")?.textContent, "PR #12: Change twelve");
+    assert.match(dom.nodes.get("merge-meta")?.textContent ?? "", /^Merged 2026-10-08T09:00:00Z as 0123456 · Screens: c03-characters$/);
+    assert.deepEqual(
+      grid.children.map((figure) => figure.children[0]?.children[1]?.textContent),
+      ["c03-characters · desktop 1440x900"],
+    );
+
+    // A slow merge loses to a newer choice: going back to develop wins.
+    view.value = B;
+    view.emit("change");
+    view.value = "develop";
+    view.emit("change");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    pending!(zipResponse(snapshot(B)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(details.hidden, true);
+    assert.deepEqual(
+      grid.children.map((figure) => figure.children[0]?.children[1]?.textContent),
+      ["home · desktop", "home · mobile"],
+    );
+    assert.deepEqual(calls, ["/archive", "/api/merges", `/merges/${A}/archive`, `/merges/${B}/archive`, "/archive"]);
+  });
+
+  it("refuses a merge archive for another merge, and says when history is missing", async () => {
+    const A = "pr-12-0123456789ab";
+    const dom = new FakeDom();
+    await startGallery(
+      dom,
+      async (url) => {
+        if (url === "/archive") return zipResponse(galleryZip());
+        if (url === "/api/merges") {
+          return jsonResponse({
+            merges: [
+              {
+                id: A,
+                pr: { number: 12, title: "Change twelve" },
+                mergeCommit: "0123456789ab" + "c".repeat(28),
+                mergedAt: "2026-10-08T09:00:00Z",
+                screens: ["home"],
+              },
+            ],
+          });
+        }
+        // The archive at this merge's path claims to be another merge.
+        return zipResponse(galleryZip(undefined, { snapshot: { id: "pr-13-0123456789ab" } }));
+      },
+      LIMITS,
+    );
+    const view = dom.nodes.get("view")!;
+    view.value = A;
+    view.emit("change");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(dom.nodes.get("status")?.textContent, "This merge snapshot could not be shown.");
+    assert.equal(dom.nodes.get("grid")?.children.length, 0);
+
+    const gone = new FakeDom();
+    await startGallery(
+      gone,
+      async (url) => {
+        if (url === "/archive") return zipResponse(galleryZip());
+        if (url === "/api/merges") return jsonResponse({}, 503);
+        return jsonResponse({}, 404);
+      },
+      LIMITS,
+    );
+    const option = gone.nodes.get("view")!.children[0]!.children[0]!;
+    assert.equal(option.textContent, "Merge history could not be loaded");
+    assert.equal(option.disabled, true);
+    assert.equal(gone.nodes.get("grid")?.children.length, 1);
+
+    // A develop archive that carries snapshot metadata is not the develop gallery.
+    const mixed = new FakeDom();
+    await startGallery(
+      mixed,
+      async (url) => (url === "/archive" ? zipResponse(galleryZip(undefined, { snapshot: { id: A } })) : jsonResponse({ merges: [] })),
+      LIMITS,
+    );
+    assert.equal(mixed.nodes.get("status")?.textContent, "The current archive could not be shown.");
+    assert.equal(mixed.nodes.get("view")!.children[0]!.children[0]!.textContent, "No merge snapshots yet");
   });
 });

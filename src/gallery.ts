@@ -3,20 +3,17 @@ import { ArchiveRejection, validateGalleryZip, validateSnapshotZip } from "./arc
 import { galleryDocumentHtml } from "./gallery-page.ts";
 import {
   CURRENT_ARCHIVE_KEY,
+  LEGACY_ARCHIVE_KEY,
   LIMITS,
   SNAPSHOT_ID,
   snapshotArchiveKey,
+  snapshotManifestKey,
   type RejectionCode,
 } from "./limits.ts";
+import { listMerges, mergeSummaryBytes, pruneMerges, type MergeBucket } from "./merges.ts";
 
-export interface ArchiveBucket {
-  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
-  put(
-    key: string,
-    value: Uint8Array,
-    options?: { httpMetadata?: { contentType?: string } },
-  ): Promise<unknown>;
-}
+/** Private R2: get/put for archives, list/delete for merge history. */
+export type ArchiveBucket = MergeBucket;
 
 export type GalleryBindings = {
   SCREENSHOTS?: ArchiveBucket;
@@ -49,7 +46,16 @@ function text(status: number, body: string, extra?: Record<string, string>): Res
 
 function json(
   status: number,
-  body: { ok?: boolean; archive?: string; snapshot?: string; error?: RejectionCode; generatedAt?: string; images?: string[] },
+  body: {
+    ok?: boolean;
+    archive?: string;
+    snapshot?: string;
+    error?: RejectionCode;
+    generatedAt?: string;
+    images?: string[];
+    pruned?: string[];
+    retention?: "complete" | "incomplete";
+  },
 ): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -160,9 +166,12 @@ async function publish(request: Request, env: GalleryBindings): Promise<Response
 }
 
 /**
- * Store one merge snapshot at `merges/<id>/archive.zip`. The id in the path must
- * match the manifest, so a retry of the same merge replaces its own object and
- * never touches the current archive or another merge's snapshot.
+ * Store one merge snapshot in its own folder: `merges/<id>/archive.zip`, then
+ * `merges/<id>/manifest.json` (the summary the merge list reads). The id in
+ * the path must match the manifest, so a retry of the same merge replaces its
+ * own folder and never touches `develop/` or another merge. Only after both
+ * are stored are merges past the newest ten pruned; a pruning error leaves
+ * extra history for the next publish to remove and does not fail this one.
  */
 async function publishSnapshot(request: Request, env: GalleryBindings, id: string): Promise<Response> {
   if (!publisherAllowed(request, env)) return text(401, "Unauthorized");
@@ -183,8 +192,20 @@ async function publishSnapshot(request: Request, env: GalleryBindings, id: strin
     await bucket.put(key, body, {
       httpMetadata: { contentType: "application/zip" },
     });
+    await bucket.put(
+      snapshotManifestKey(id),
+      mergeSummaryBytes({ ...validated.snapshot, generatedAt: validated.generatedAt, images: validated.images.length }),
+      { httpMetadata: { contentType: "application/json" } },
+    );
   } catch {
     return text(503, "The snapshot was not stored.");
+  }
+  let pruned: string[] = [];
+  let retention: "complete" | "incomplete" = "complete";
+  try {
+    pruned = await pruneMerges(bucket, id);
+  } catch {
+    retention = "incomplete";
   }
   return json(200, {
     ok: true,
@@ -192,6 +213,19 @@ async function publishSnapshot(request: Request, env: GalleryBindings, id: strin
     snapshot: id,
     generatedAt: validated.generatedAt,
     images: validated.images.map((image) => image.file),
+    pruned,
+    retention,
+  });
+}
+
+function zip(bytes: Uint8Array<ArrayBuffer>, filename: string): Response {
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      ...SECURITY_HEADERS,
+      "content-type": "application/zip",
+      "content-disposition": `attachment; filename="${filename}"`,
+    },
   });
 }
 
@@ -234,16 +268,23 @@ export async function handleRequest(
   if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/archive") {
     const bucket = env.SCREENSHOTS;
     if (!bucket) return text(503, "Gallery storage is not configured.");
-    const object = await bucket.get(CURRENT_ARCHIVE_KEY);
+    // The develop gallery; before its first develop/ publish, the archive at the old key.
+    const object = (await bucket.get(CURRENT_ARCHIVE_KEY)) ?? (await bucket.get(LEGACY_ARCHIVE_KEY));
     if (!object) return text(404, "No screenshots have been published.");
-    const bytes = new Uint8Array(await object.arrayBuffer());
-    return new Response(bytes, {
+    return zip(new Uint8Array(await object.arrayBuffer()), "develop-screenshots.zip");
+  }
+  if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/api/merges") {
+    const bucket = env.SCREENSHOTS;
+    if (!bucket) return text(503, "Gallery storage is not configured.");
+    let merges;
+    try {
+      merges = await listMerges(bucket);
+    } catch {
+      return text(503, "The merge list could not be read.");
+    }
+    return new Response(JSON.stringify({ merges }), {
       status: 200,
-      headers: {
-        ...SECURITY_HEADERS,
-        "content-type": "application/zip",
-        "content-disposition": `attachment; filename="${CURRENT_ARCHIVE_KEY}"`,
-      },
+      headers: { ...SECURITY_HEADERS, "content-type": "application/json; charset=utf-8" },
     });
   }
   const snapshotRead = SNAPSHOT_PATH.exec(url.pathname);
@@ -253,15 +294,7 @@ export async function handleRequest(
     const key = snapshotArchiveKey(snapshotRead[1]!);
     const object = await bucket.get(key);
     if (!object) return text(404, "No snapshot has been published for this merge.");
-    const bytes = new Uint8Array(await object.arrayBuffer());
-    return new Response(bytes, {
-      status: 200,
-      headers: {
-        ...SECURITY_HEADERS,
-        "content-type": "application/zip",
-        "content-disposition": `attachment; filename="${snapshotRead[1]!}.zip"`,
-      },
-    });
+    return zip(new Uint8Array(await object.arrayBuffer()), `${snapshotRead[1]!}.zip`);
   }
   return text(404, "Not found");
 }

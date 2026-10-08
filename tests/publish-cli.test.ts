@@ -84,7 +84,7 @@ describe("publish:archive", () => {
       assert.equal(ok.status, 0, ok.stderr);
       assert.equal(ok.stdout.includes(SECRET), false);
       assert.equal(ok.stderr.includes(SECRET), false);
-      assert.match(ok.stdout, /current-screenshots\.zip/);
+      assert.match(ok.stdout, /develop\/archive\.zip/);
       assert.equal(bucket.objects.has(CURRENT_ARCHIVE_KEY), true);
 
       const bad = await runCli([badPath], {

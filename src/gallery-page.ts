@@ -81,6 +81,49 @@ const PAGE_STYLE = `
     color: var(--ink-muted);
     font-variant-numeric: tabular-nums;
   }
+  .view-picker {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px 10px;
+    margin-top: 6px;
+    max-width: 100%;
+  }
+  .view-picker label {
+    font-size: 0.92rem;
+    color: var(--ink-muted);
+  }
+  .view-picker select {
+    min-height: 44px;
+    max-width: min(28rem, 100%);
+    padding: 8px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    background: var(--bg-control);
+    color: var(--ink);
+    font: inherit;
+  }
+  .view-picker select:hover { background: var(--bg-control-hover); }
+  .view-picker select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .merge-details {
+    max-width: 1400px;
+    margin: 18px auto 0;
+    padding: 0 24px;
+  }
+  .merge-details h2 {
+    margin: 0;
+    font-family: Georgia, "Palatino Linotype", "Book Antiqua", Palatino, serif;
+    font-size: 1.15rem;
+    color: var(--gold);
+    overflow-wrap: anywhere;
+  }
+  .merge-details p {
+    margin: 4px 0 0;
+    font-size: 0.9rem;
+    color: var(--ink-muted);
+    overflow-wrap: anywhere;
+  }
   .status {
     margin: 0;
     padding: 16px 20px 0;
@@ -344,6 +387,7 @@ const PAGE_STYLE = `
     .site-header h1 { font-size: 1.35rem; }
     .tagline { font-size: 0.92rem; padding: 0 4px; }
     .status:not([hidden]) { margin: 12px 12px 0; }
+    .merge-details { padding: 0 12px; margin-top: 14px; }
     .grid {
       grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
       gap: 12px;
@@ -376,8 +420,18 @@ export function galleryDocumentHtml(): string {
     }
     <h1>QuestForge Screenshot Gallery</h1>
     <p class="tagline">Latest previews across themes and screen sizes.</p>
+    <div class="view-picker">
+      <label for="view">Show</label>
+      <select id="view">
+        <option value="develop" selected>Develop: full gallery</option>
+      </select>
+    </div>
     <p id="when">Loading the current set…</p>
   </header>
+  <section id="merge-details" class="merge-details" aria-live="polite" hidden>
+    <h2 id="merge-title"></h2>
+    <p id="merge-meta"></p>
+  </section>
   <p id="status" class="status" hidden></p>
   <div id="grid" class="grid"></div>
   <dialog id="viewer" aria-labelledby="full-label">

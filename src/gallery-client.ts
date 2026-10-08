@@ -9,6 +9,7 @@ export type GalleryEvent = {
 export type GalleryNode = {
   textContent: string;
   hidden: boolean;
+  value: string;
   src: string;
   alt: string;
   type: string;
@@ -21,6 +22,7 @@ export type GalleryNode = {
     contains(token: string): boolean;
   };
   append(child: GalleryNode): void;
+  replaceChildren(): void;
   setAttribute(name: string, value: string): void;
   addEventListener(type: string, listener: (event?: GalleryEvent) => void): void;
   showModal(): void;
@@ -43,6 +45,10 @@ type FetchLike = (url: string) => Promise<{
 /**
  * Browser gallery startup. Kept free of imports so the Worker can embed
  * function source in the page. Server-side validation lives in archive.ts.
+ *
+ * The page opens on the develop gallery (`/archive`). The view selector also
+ * offers the last ten merge snapshots (`/api/merges`); choosing one loads only
+ * that merge's archive (`/merges/<id>/archive`) and shows its PR details.
  */
 export async function startGallery(
   doc: GalleryDom,
@@ -58,7 +64,12 @@ export async function startGallery(
   const close = doc.getElementById("close");
   const prev = doc.getElementById("prev");
   const next = doc.getElementById("next");
+  const view = doc.getElementById("view");
+  const details = doc.getElementById("merge-details");
+  const mergeTitle = doc.getElementById("merge-title");
+  const mergeMeta = doc.getElementById("merge-meta");
   if (!when || !status || !grid || !viewer || !full || !fullLabel || !close || !prev || !next) return;
+  if (!view || !details || !mergeTitle || !mergeMeta) return;
 
   const showStatus = (message: string) => {
     status.hidden = false;
@@ -68,6 +79,9 @@ export async function startGallery(
   const imagePath = /^images\/[a-z0-9][a-z0-9-]{0,40}\.(png|jpg|jpeg|webp)$/;
   const label = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,40}$/;
   const generatedAtPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+  const mergeIdPattern = /^pr-[1-9][0-9]{0,6}-[0-9a-f]{12}$/;
+  const commitPattern = /^[0-9a-f]{40}$/;
+  const screenIdPattern = /^[a-z0-9][a-z0-9-]{0,40}$/;
 
   const crcTable = new Uint32Array(256);
   for (let n = 0; n < 256; n += 1) {
@@ -204,18 +218,30 @@ export async function startGallery(
 
     const manifest = entries.find((entry) => entry.name === "manifest.json");
     if (!manifest) fail("bad_manifest");
-    let parsed: { generatedAt?: unknown; images?: unknown };
+    let parsed: { generatedAt?: unknown; images?: unknown; snapshot?: unknown };
     try {
       parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(manifest.bytes)) as {
         generatedAt?: unknown;
         images?: unknown;
+        snapshot?: unknown;
       };
     } catch {
       fail("bad_manifest");
     }
     if (!parsed || Array.isArray(parsed)) fail("bad_manifest");
     const keys = Object.keys(parsed).sort();
-    if (keys.length !== 2 || keys[0] !== "generatedAt" || keys[1] !== "images") fail("bad_manifest");
+    // The develop gallery has only generatedAt and images; a merge snapshot adds `snapshot`.
+    const plain = keys.length === 2 && keys[0] === "generatedAt" && keys[1] === "images";
+    const merge = keys.length === 3 && keys[0] === "generatedAt" && keys[1] === "images" && keys[2] === "snapshot";
+    if (!plain && !merge) fail("bad_manifest");
+    let snapshotId = "";
+    if (merge) {
+      const snapshot = parsed.snapshot as { id?: unknown } | null;
+      if (!snapshot || typeof snapshot !== "object" || typeof snapshot.id !== "string" || !mergeIdPattern.test(snapshot.id)) {
+        fail("bad_manifest");
+      }
+      snapshotId = snapshot.id;
+    }
     if (typeof parsed.generatedAt !== "string" || !generatedAtPattern.test(parsed.generatedAt)) {
       fail("bad_manifest");
     }
@@ -267,52 +293,25 @@ export async function startGallery(
       if (entry.name === "manifest.json") continue;
       if (!images.some((image) => image.file === entry.name)) fail("unexpected_entry");
     }
-    return { generatedAt: parsed.generatedAt, images };
+    return { generatedAt: parsed.generatedAt, images, snapshotId };
   };
 
-  let response: { ok: boolean; status: number; arrayBuffer(): Promise<ArrayBuffer> };
-  try {
-    response = await fetchArchive("/archive");
-  } catch {
-    showStatus("The current archive could not be shown.");
-    return;
-  }
-  if (response.status === 404) {
-    showStatus("No screenshots have been published yet.");
-    return;
-  }
-  if (!response.ok) {
-    showStatus("The current archive could not be shown.");
-    return;
-  }
+  type Merge = {
+    id: string;
+    pr: { number: number; title: string };
+    mergeCommit: string;
+    mergedAt: string;
+    screens: string[];
+  };
 
-  let unpacked;
-  try {
-    const buffer = new Uint8Array(await response.arrayBuffer());
-    unpacked = await unpack(buffer);
-  } catch (error) {
-    const code = error instanceof Error ? error.message : "";
-    showStatus(
-      code === "too_large" || code === "expanded_too_large"
-        ? "The archive is too large to open in the browser."
-        : "The current archive could not be shown.",
-    );
-    return;
-  }
-
-  when.textContent = unpacked.generatedAt;
-  if (unpacked.images.length === 0) {
-    showStatus("This capture has no screenshots.");
-    return;
-  }
-  status.hidden = true;
-  status.textContent = "";
-
-  const slides: { src: string; caption: string }[] = [];
+  let slides: { src: string; caption: string }[] = [];
+  let objectUrls: string[] = [];
   let index = 0;
   let opener: GalleryNode | null = null;
   let savedScroll = 0;
   let actualSize = false;
+  let generation = 0;
+  let merges: Merge[] = [];
 
   const applySize = () => {
     if (actualSize) viewer.classList.add("is-actual");
@@ -354,35 +353,181 @@ export async function startGallery(
     showAt(index + delta);
   };
 
-  for (const image of unpacked.images) {
-    const figure = doc.createElement("figure");
-    const button = doc.createElement("button");
-    button.type = "button";
-    button.setAttribute("type", "button");
-    const img = doc.createElement("img");
-    const caption = image.screen + " · " + image.viewport;
-    img.alt = caption;
-    const imageBytes = new ArrayBuffer(image.bytes.byteLength);
-    new Uint8Array(imageBytes).set(image.bytes);
-    img.src = URL.createObjectURL(new Blob([imageBytes], { type: image.type }));
-    const figcaption = doc.createElement("figcaption");
-    figcaption.textContent = caption;
-    button.append(img);
-    button.append(figcaption);
-    const slideIndex = slides.length;
-    slides.push({ src: img.src, caption });
-    button.addEventListener("click", () => {
-      opener = button;
-      savedScroll = readScroll();
-      actualSize = false;
-      applySize();
-      showAt(slideIndex);
-      viewer.showModal();
-      close.focus({ preventScroll: true });
-    });
-    figure.append(button);
-    grid.append(figure);
+  const clearGrid = () => {
+    const revoke = (URL as { revokeObjectURL?: (url: string) => void }).revokeObjectURL;
+    if (typeof revoke === "function") for (const url of objectUrls) revoke(url);
+    objectUrls = [];
+    slides = [];
+    grid.replaceChildren();
+  };
+
+  const render = (images: { screen: string; viewport: string; bytes: Uint8Array; type: string }[]) => {
+    for (const image of images) {
+      const figure = doc.createElement("figure");
+      const button = doc.createElement("button");
+      button.type = "button";
+      button.setAttribute("type", "button");
+      const img = doc.createElement("img");
+      const caption = image.screen + " · " + image.viewport;
+      img.alt = caption;
+      const imageBytes = new ArrayBuffer(image.bytes.byteLength);
+      new Uint8Array(imageBytes).set(image.bytes);
+      img.src = URL.createObjectURL(new Blob([imageBytes], { type: image.type }));
+      objectUrls.push(img.src);
+      const figcaption = doc.createElement("figcaption");
+      figcaption.textContent = caption;
+      button.append(img);
+      button.append(figcaption);
+      const slideIndex = slides.length;
+      slides.push({ src: img.src, caption });
+      button.addEventListener("click", () => {
+        opener = button;
+        savedScroll = readScroll();
+        actualSize = false;
+        applySize();
+        showAt(slideIndex);
+        viewer.showModal();
+        close.focus({ preventScroll: true });
+      });
+      figure.append(button);
+      grid.append(figure);
+    }
+  };
+
+  /** Load one archive into the grid: the develop gallery, or the merge `mergeId`. A newer choice wins. */
+  const load = async (url: string, mergeId: string) => {
+    generation += 1;
+    const mine = generation;
+    clearGrid();
+    status.hidden = true;
+    status.textContent = "";
+    when.textContent = mergeId ? "Loading the merge snapshot…" : "Loading the current set…";
+    const unavailable = mergeId ? "This merge snapshot could not be shown." : "The current archive could not be shown.";
+    let response: { ok: boolean; status: number; arrayBuffer(): Promise<ArrayBuffer> };
+    let unpacked;
+    try {
+      response = await fetchArchive(url);
+      if (mine !== generation) return;
+      if (response.status === 404) {
+        when.textContent = "";
+        showStatus(mergeId ? "This merge snapshot is no longer kept." : "No screenshots have been published yet.");
+        return;
+      }
+      if (!response.ok) {
+        when.textContent = "";
+        showStatus(unavailable);
+        return;
+      }
+      const buffer = new Uint8Array(await response.arrayBuffer());
+      unpacked = await unpack(buffer);
+      if (mine !== generation) return;
+      if (unpacked.snapshotId !== mergeId) fail("bad_manifest");
+    } catch (error) {
+      if (mine !== generation) return;
+      const code = error instanceof Error ? error.message : "";
+      when.textContent = "";
+      showStatus(
+        code === "too_large" || code === "expanded_too_large" ? "The archive is too large to open in the browser." : unavailable,
+      );
+      return;
+    }
+    when.textContent = unpacked.generatedAt;
+    if (unpacked.images.length === 0) {
+      showStatus("This capture has no screenshots.");
+      return;
+    }
+    render(unpacked.images);
+  };
+
+  const showDevelop = () => {
+    details.hidden = true;
+    mergeTitle.textContent = "";
+    mergeMeta.textContent = "";
+    return load("/archive", "");
+  };
+
+  const showMerge = (merge: Merge) => {
+    mergeTitle.textContent = "PR #" + merge.pr.number + ": " + merge.pr.title;
+    mergeMeta.textContent =
+      "Merged " + merge.mergedAt + " as " + merge.mergeCommit.slice(0, 7) + " · Screens: " + merge.screens.join(", ");
+    details.hidden = false;
+    return load("/merges/" + merge.id + "/archive", merge.id);
+  };
+
+  /** The merge list, re-checked here; entries that don't look right are left out. */
+  const readMerges = async (): Promise<Merge[] | null> => {
+    try {
+      const response = await fetchArchive("/api/merges");
+      if (!response.ok) return null;
+      const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(await response.arrayBuffer()))) as {
+        merges?: unknown;
+      };
+      if (!parsed || !Array.isArray(parsed.merges)) return null;
+      const valid: Merge[] = [];
+      for (const item of parsed.merges.slice(0, 10)) {
+        const merge = item as Merge;
+        if (
+          !merge ||
+          typeof merge.id !== "string" ||
+          !mergeIdPattern.test(merge.id) ||
+          !merge.pr ||
+          !Number.isInteger(merge.pr.number) ||
+          typeof merge.pr.title !== "string" ||
+          typeof merge.mergeCommit !== "string" ||
+          !commitPattern.test(merge.mergeCommit) ||
+          typeof merge.mergedAt !== "string" ||
+          !generatedAtPattern.test(merge.mergedAt) ||
+          !Array.isArray(merge.screens) ||
+          !merge.screens.every((screen) => typeof screen === "string" && screenIdPattern.test(screen))
+        ) {
+          continue;
+        }
+        valid.push({
+          id: merge.id,
+          pr: { number: merge.pr.number, title: merge.pr.title.slice(0, 200) },
+          mergeCommit: merge.mergeCommit,
+          mergedAt: merge.mergedAt,
+          screens: merge.screens.slice(),
+        });
+      }
+      return valid;
+    } catch {
+      return null;
+    }
+  };
+
+  view.addEventListener("change", () => {
+    const chosen = view.value;
+    if (chosen === "develop") {
+      void showDevelop();
+      return;
+    }
+    const merge = merges.find((candidate) => candidate.id === chosen);
+    if (merge) void showMerge(merge);
+  });
+
+  await showDevelop();
+
+  const listed = await readMerges();
+  const group = doc.createElement("optgroup");
+  group.setAttribute("label", "Last 10 merges");
+  if (listed === null || listed.length === 0) {
+    const option = doc.createElement("option");
+    option.value = "";
+    option.disabled = true;
+    option.textContent = listed === null ? "Merge history could not be loaded" : "No merge snapshots yet";
+    group.append(option);
+  } else {
+    merges = listed;
+    for (const merge of merges) {
+      const option = doc.createElement("option");
+      option.value = merge.id;
+      const title = merge.pr.title.length > 60 ? merge.pr.title.slice(0, 59) + "…" : merge.pr.title;
+      option.textContent = "#" + merge.pr.number + " · " + title;
+      group.append(option);
+    }
   }
+  view.append(group);
 
   prev.addEventListener("click", () => {
     if (prev.disabled) return;

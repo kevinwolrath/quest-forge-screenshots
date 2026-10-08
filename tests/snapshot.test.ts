@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 
 import { ArchiveRejection, buildStoredZip, validateGalleryZip, validateSnapshotZip } from "../src/archive.ts";
 import { handleRequest, type GalleryBindings } from "../src/gallery.ts";
-import { CURRENT_ARCHIVE_KEY, snapshotArchiveKey } from "../src/limits.ts";
+import { CURRENT_ARCHIVE_KEY, snapshotArchiveKey, snapshotManifestKey } from "../src/limits.ts";
 import { GENERATED_AT, JPEG, PNG, galleryZip } from "./gallery-fixtures.ts";
 import { MemoryBucket } from "./memory-bucket.ts";
 
@@ -143,7 +143,7 @@ describe("merge snapshot publishing", () => {
 
     const retry = snapshotZip(snapshotBlock(), IMAGES.slice(0, 2).concat(IMAGES.slice(2)));
     assert.equal((await handleRequest(post(`/publish/snapshots/${ID}`, retry), bindings(bucket))).status, 200);
-    assert.deepEqual([...bucket.objects.keys()].sort(), [CURRENT_ARCHIVE_KEY, snapshotArchiveKey(ID)]);
+    assert.deepEqual([...bucket.objects.keys()].sort(), [CURRENT_ARCHIVE_KEY, snapshotArchiveKey(ID), snapshotManifestKey(ID)].sort());
     assert.deepEqual(bucket.objects.get(CURRENT_ARCHIVE_KEY), current);
   });
 
