@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 
-import { ArchiveRejection, validateGalleryZip } from "../src/archive.ts";
+import { ArchiveRejection, validateGalleryZip, validateSnapshotZip } from "../src/archive.ts";
 import { LIMITS } from "../src/limits.ts";
 
 function redact(message: string, secret: string): string {
@@ -16,9 +16,16 @@ function fail(message: string): never {
 async function main(): Promise<void> {
   const secret = process.env.GALLERY_PUBLISH_SECRET ?? "";
   const rawUrl = process.env.GALLERY_PUBLISH_URL?.trim() ?? "";
-  const file = process.argv[2];
-  if (!file || process.argv.length !== 3) {
-    fail("Usage: npm run publish:archive -- <gallery.zip>");
+  // `--snapshot` publishes a merge snapshot (`npm run publish:snapshot`) instead of the current archive.
+  const args = process.argv.slice(2);
+  const snapshot = args[0] === "--snapshot";
+  const file = snapshot ? args[1] : args[0];
+  if (!file || args.length !== (snapshot ? 2 : 1)) {
+    fail(
+      snapshot
+        ? "Usage: npm run publish:snapshot -- <snapshot.zip>"
+        : "Usage: npm run publish:archive -- <gallery.zip>",
+    );
   }
   let target: URL;
   try {
@@ -41,8 +48,15 @@ async function main(): Promise<void> {
   const info = await stat(file);
   if (info.size > LIMITS.maxZipBytes) fail("archive rejected: too_large");
   const bytes = new Uint8Array(await readFile(file));
+  let destination = target;
   try {
-    await validateGalleryZip(bytes);
+    if (snapshot) {
+      // GALLERY_PUBLISH_URL stays the /publish URL; the snapshot route sits under it, keyed by merge.
+      const { snapshot: info } = await validateSnapshotZip(bytes);
+      destination = new URL(`/publish/snapshots/${info.id}`, target);
+    } else {
+      await validateGalleryZip(bytes);
+    }
   } catch (error) {
     const code = error instanceof ArchiveRejection ? error.code : "malformed";
     fail(`archive rejected: ${code}`);
@@ -50,7 +64,7 @@ async function main(): Promise<void> {
 
   let response: Response;
   try {
-    response = await fetch(target, {
+    response = await fetch(destination, {
       method: "POST",
       headers: {
         authorization: `Bearer ${secret}`,

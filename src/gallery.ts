@@ -1,7 +1,13 @@
 import { loadAccessCerts, verifyAccessJwt } from "./access.ts";
-import { ArchiveRejection, validateGalleryZip } from "./archive.ts";
+import { ArchiveRejection, validateGalleryZip, validateSnapshotZip } from "./archive.ts";
 import { galleryDocumentHtml } from "./gallery-page.ts";
-import { CURRENT_ARCHIVE_KEY, LIMITS, type RejectionCode } from "./limits.ts";
+import {
+  CURRENT_ARCHIVE_KEY,
+  LIMITS,
+  SNAPSHOT_ID,
+  snapshotArchiveKey,
+  type RejectionCode,
+} from "./limits.ts";
 
 export interface ArchiveBucket {
   get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
@@ -41,7 +47,10 @@ function text(status: number, body: string, extra?: Record<string, string>): Res
   });
 }
 
-function json(status: number, body: { ok?: boolean; archive?: string; error?: RejectionCode; generatedAt?: string; images?: string[] }): Response {
+function json(
+  status: number,
+  body: { ok?: boolean; archive?: string; snapshot?: string; error?: RejectionCode; generatedAt?: string; images?: string[] },
+): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
@@ -116,12 +125,14 @@ async function viewerAllowed(
   return verify(jwt, env);
 }
 
-async function publish(request: Request, env: GalleryBindings): Promise<Response> {
+function publisherAllowed(request: Request, env: GalleryBindings): boolean {
   const configured = env.PUBLISH_SECRET ?? "";
   const presented = bearer(request);
-  if (configured.length === 0 || presented.length === 0 || !safeEqual(presented, configured)) {
-    return text(401, "Unauthorized");
-  }
+  return configured.length > 0 && presented.length > 0 && safeEqual(presented, configured);
+}
+
+async function publish(request: Request, env: GalleryBindings): Promise<Response> {
+  if (!publisherAllowed(request, env)) return text(401, "Unauthorized");
   const bucket = env.SCREENSHOTS;
   if (!bucket) return text(503, "Gallery storage is not configured.");
   const body = await readBody(request, LIMITS.maxZipBytes);
@@ -148,6 +159,45 @@ async function publish(request: Request, env: GalleryBindings): Promise<Response
   });
 }
 
+/**
+ * Store one merge snapshot at `merges/<id>/archive.zip`. The id in the path must
+ * match the manifest, so a retry of the same merge replaces its own object and
+ * never touches the current archive or another merge's snapshot.
+ */
+async function publishSnapshot(request: Request, env: GalleryBindings, id: string): Promise<Response> {
+  if (!publisherAllowed(request, env)) return text(401, "Unauthorized");
+  const bucket = env.SCREENSHOTS;
+  if (!bucket) return text(503, "Gallery storage is not configured.");
+  const body = await readBody(request, LIMITS.maxZipBytes);
+  if (body instanceof ArchiveRejection) return json(400, { error: body.code });
+  let validated;
+  try {
+    validated = await validateSnapshotZip(body);
+  } catch (error) {
+    const code = error instanceof ArchiveRejection ? error.code : "malformed";
+    return json(400, { error: code });
+  }
+  if (validated.snapshot.id !== id) return json(400, { error: "bad_manifest" });
+  const key = snapshotArchiveKey(id);
+  try {
+    await bucket.put(key, body, {
+      httpMetadata: { contentType: "application/zip" },
+    });
+  } catch {
+    return text(503, "The snapshot was not stored.");
+  }
+  return json(200, {
+    ok: true,
+    archive: key,
+    snapshot: id,
+    generatedAt: validated.generatedAt,
+    images: validated.images.map((image) => image.file),
+  });
+}
+
+const SNAPSHOT_PUBLISH_PATH = /^\/publish\/snapshots\/([^/]+)$/;
+const SNAPSHOT_PATH = /^\/merges\/([^/]+)\/archive$/;
+
 function html(): Response {
   return new Response(galleryDocumentHtml(), {
     status: 200,
@@ -169,6 +219,12 @@ export async function handleRequest(
   if (request.method === "POST" && url.pathname === "/publish") {
     return publish(request, env);
   }
+  const snapshotPublish = SNAPSHOT_PUBLISH_PATH.exec(url.pathname);
+  if (request.method === "POST" && snapshotPublish) {
+    const id = snapshotPublish[1]!;
+    if (!SNAPSHOT_ID.test(id)) return text(404, "Not found");
+    return publishSnapshot(request, env, id);
+  }
   if (!(await viewerAllowed(request, env, deps))) {
     return text(403, "Forbidden");
   }
@@ -187,6 +243,23 @@ export async function handleRequest(
         ...SECURITY_HEADERS,
         "content-type": "application/zip",
         "content-disposition": `attachment; filename="${CURRENT_ARCHIVE_KEY}"`,
+      },
+    });
+  }
+  const snapshotRead = SNAPSHOT_PATH.exec(url.pathname);
+  if ((request.method === "GET" || request.method === "HEAD") && snapshotRead && SNAPSHOT_ID.test(snapshotRead[1]!)) {
+    const bucket = env.SCREENSHOTS;
+    if (!bucket) return text(503, "Gallery storage is not configured.");
+    const key = snapshotArchiveKey(snapshotRead[1]!);
+    const object = await bucket.get(key);
+    if (!object) return text(404, "No snapshot has been published for this merge.");
+    const bytes = new Uint8Array(await object.arrayBuffer());
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        ...SECURITY_HEADERS,
+        "content-type": "application/zip",
+        "content-disposition": `attachment; filename="${snapshotRead[1]!}.zip"`,
       },
     });
   }
