@@ -41,7 +41,7 @@ A rejected upload leaves the previous ZIP in place. A failed write does too. The
 
 QuestForge also publishes a snapshot of the screens a merged pull request declared. It goes to its own object and never replaces `current-screenshots.zip`:
 
-- `POST /publish/snapshots/<id>` with the same upload secret. `<id>` is `pr-<number>-<first 12 hex of the merge commit>`, so a retry of the same merge replaces its own `snapshots/<id>.zip` instead of adding another.
+- `POST /publish/snapshots/<id>` with the same upload secret. `<id>` is `pr-<number>-<first 12 hex of the merge commit>`, so a retry of the same merge replaces its own `merges/<id>/archive.zip` instead of adding another.
 - The ZIP follows the archive rules above. Its `manifest.json` also has a `snapshot` block:
 
   ```json
@@ -62,7 +62,7 @@ QuestForge also publishes a snapshot of the screens a merged pull request declar
 
   The id must match the PR number, the merge commit and the path. `screens` and `viewports` are stable ids; every image belongs to one of each (its `viewport` label starts with the viewport id), and each listed id has an image. The PR title is plain text of at most 200 characters with no line breaks or control characters.
 - A rejected or failed write leaves any earlier snapshot and the current archive as they were.
-- `GET /snapshots/<id>` returns that ZIP to a signed-in viewer, behind the same Access check as `/archive`. Listing and showing snapshots in the gallery page is separate work.
+- `GET /merges/<id>/archive` returns that ZIP to a signed-in viewer, behind the same Access check as `/archive`. Listing and showing snapshots in the gallery page is separate work.
 
 ```bash
 npm run publish:snapshot -- ./snapshot.zip

@@ -160,7 +160,7 @@ async function publish(request: Request, env: GalleryBindings): Promise<Response
 }
 
 /**
- * Store one merge snapshot at `snapshots/<id>.zip`. The id in the path must
+ * Store one merge snapshot at `merges/<id>/archive.zip`. The id in the path must
  * match the manifest, so a retry of the same merge replaces its own object and
  * never touches the current archive or another merge's snapshot.
  */
@@ -196,7 +196,7 @@ async function publishSnapshot(request: Request, env: GalleryBindings, id: strin
 }
 
 const SNAPSHOT_PUBLISH_PATH = /^\/publish\/snapshots\/([^/]+)$/;
-const SNAPSHOT_PATH = /^\/snapshots\/([^/]+)$/;
+const SNAPSHOT_PATH = /^\/merges\/([^/]+)\/archive$/;
 
 function html(): Response {
   return new Response(galleryDocumentHtml(), {

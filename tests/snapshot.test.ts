@@ -136,7 +136,7 @@ describe("merge snapshot publishing", () => {
     const response = await handleRequest(post(`/publish/snapshots/${ID}`, first), bindings(bucket));
     assert.equal(response.status, 200);
     const body = (await response.json()) as { archive: string; snapshot: string; images: string[] };
-    assert.equal(body.archive, `snapshots/${ID}.zip`);
+    assert.equal(body.archive, `merges/${ID}/archive.zip`);
     assert.equal(body.snapshot, ID);
     assert.equal(body.images.length, IMAGES.length);
     assert.equal(JSON.stringify(body).includes(SECRET), false);
@@ -182,10 +182,10 @@ describe("merge snapshot publishing", () => {
     bucket.objects.set(snapshotArchiveKey(ID), stored);
     const allow = { verifyAccess: async (jwt: string) => jwt === TOKEN };
 
-    const anonymous = await handleRequest(new Request(`https://gallery.test/snapshots/${ID}`), bindings(bucket), allow);
+    const anonymous = await handleRequest(new Request(`https://gallery.test/merges/${ID}/archive`), bindings(bucket), allow);
     assert.equal(anonymous.status, 403);
     const bearer = await handleRequest(
-      new Request(`https://gallery.test/snapshots/${ID}`, { headers: { authorization: `Bearer ${SECRET}` } }),
+      new Request(`https://gallery.test/merges/${ID}/archive`, { headers: { authorization: `Bearer ${SECRET}` } }),
       bindings(bucket),
       allow,
     );
@@ -194,12 +194,12 @@ describe("merge snapshot publishing", () => {
 
     const viewer = (pathname: string) =>
       handleRequest(new Request(`https://gallery.test${pathname}`, { headers: { "cf-access-jwt-assertion": TOKEN } }), bindings(bucket), allow);
-    const found = await viewer(`/snapshots/${ID}`);
+    const found = await viewer(`/merges/${ID}/archive`);
     assert.equal(found.status, 200);
     assert.equal(found.headers.get("content-type"), "application/zip");
     assert.deepEqual(new Uint8Array(await found.arrayBuffer()), stored);
-    assert.equal((await viewer("/snapshots/pr-1-000000000000")).status, 404);
-    assert.equal((await viewer("/snapshots/..%2Fcurrent-screenshots")).status, 404);
+    assert.equal((await viewer("/merges/pr-1-000000000000/archive")).status, 404);
+    assert.equal((await viewer("/merges/..%2Fcurrent-screenshots/archive")).status, 404);
   });
 });
 
@@ -246,7 +246,7 @@ describe("publish:snapshot", () => {
     try {
       const ok = await run(["--snapshot", good]);
       assert.equal(ok.status, 0, ok.stderr);
-      assert.match(ok.stdout, new RegExp(`snapshots/${ID}\\.zip`));
+      assert.match(ok.stdout, new RegExp(`merges/${ID}/archive\\.zip`));
       assert.equal(ok.stdout.includes(SECRET), false);
       assert.deepEqual(paths, [`/publish/snapshots/${ID}`]);
       assert.equal(bucket.objects.has(snapshotArchiveKey(ID)), true);
