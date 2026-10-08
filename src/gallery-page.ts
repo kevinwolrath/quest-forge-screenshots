@@ -26,6 +26,7 @@ const PAGE_STYLE = `
   }
   * { box-sizing: border-box; }
   html, body { max-width: 100%; overflow-x: hidden; }
+  html:has(dialog[open]) { overflow: hidden; }
   body {
     margin: 0;
     min-height: 100vh;
@@ -245,7 +246,10 @@ const PAGE_STYLE = `
     border-color: var(--gold-soft);
   }
   .dialog-nav:disabled {
-    opacity: 0.4;
+    opacity: 1;
+    background: #241f1a;
+    color: #8a7b68;
+    border-color: #4a4036;
     cursor: default;
   }
   .dialog-close:focus-visible,

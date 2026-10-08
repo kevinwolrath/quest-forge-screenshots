@@ -382,8 +382,14 @@ export async function startGallery(
   });
   viewer.addEventListener("close", () => {
     const target = opener;
+    const y = savedScroll;
     opener = null;
-    target?.focus({ preventScroll: true });
-    restoreScroll(savedScroll);
+    const finish = () => {
+      target?.focus({ preventScroll: true });
+      restoreScroll(y);
+    };
+    const schedule = globalThis.requestAnimationFrame;
+    if (typeof schedule === "function") schedule(() => schedule(finish));
+    else finish();
   });
 }

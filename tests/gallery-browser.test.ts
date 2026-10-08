@@ -218,9 +218,29 @@ describe("gallery browser", () => {
         assert.ok(control && control.width >= 44 && control.height >= 44);
       }
 
+      await page.setViewportSize({ width: 390, height: 480 });
+      await assertFitted(portrait.width, portrait.height);
+      assert.equal(
+        await page.evaluate(() => getComputedStyle(document.documentElement).overflow),
+        "hidden",
+      );
+      await page.keyboard.press("ArrowLeft");
+      assert.equal(await page.locator("#prev").isDisabled(), true);
+      assert.equal(await page.locator("#prev").evaluate((element) => getComputedStyle(element).opacity), "1");
+      await assertFitted(landscape.width, landscape.height);
+
+      const settle = () =>
+        page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+            }),
+        );
+
       await page.locator("#close").focus();
       await page.keyboard.press("Enter");
       assert.equal(await page.locator("dialog[open]").count(), 0);
+      await settle();
       assert.equal(await page.evaluate(() => window.scrollY), scrollBefore);
       assert.equal(await opener.evaluate((element) => element === document.activeElement), true);
 
@@ -228,6 +248,7 @@ describe("gallery browser", () => {
       await page.waitForSelector("dialog[open]");
       await page.keyboard.press("Escape");
       assert.equal(await page.locator("dialog[open]").count(), 0);
+      await settle();
       assert.equal(await page.evaluate(() => window.scrollY), scrollBefore);
       assert.equal(await opener.evaluate((element) => element === document.activeElement), true);
     } finally {
