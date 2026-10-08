@@ -1,5 +1,6 @@
 import {
   LIMITS,
+  SNAPSHOT_ID,
   type ArchiveLimits,
   type RejectionCode,
 } from "./limits.ts";
@@ -26,9 +27,26 @@ export type ValidatedArchive = {
   images: GalleryImage[];
 };
 
+/** What a merge snapshot says about the merge it shows. */
+export type SnapshotInfo = {
+  id: string;
+  kind: "merge";
+  pr: { number: number; title: string };
+  mergeCommit: string;
+  mergedAt: string;
+  screens: string[];
+  viewports: string[];
+};
+
+export type ValidatedSnapshot = ValidatedArchive & { snapshot: SnapshotInfo };
+
 const IMAGE_PATH = /^images\/[a-z0-9][a-z0-9-]{0,40}\.(png|jpg|jpeg|webp)$/;
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,40}$/;
 const GENERATED_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+const ID = /^[a-z0-9][a-z0-9-]{0,40}$/;
+const COMMIT = /^[0-9a-f]{40}$/;
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+const MAX_TITLE = 200;
 
 const CRC_TABLE = new Uint32Array(256);
 for (let n = 0; n < 256; n += 1) {
@@ -330,10 +348,102 @@ async function readEntries(bytes: Uint8Array, limits: ArchiveLimits): Promise<Ra
   return entries;
 }
 
-function parseManifest(bytes: Uint8Array, limits: ArchiveLimits): {
+type ParsedManifest = {
   generatedAt: string;
   images: Array<{ file: string; screen: string; viewport: string }>;
-} {
+  snapshot?: SnapshotInfo;
+};
+
+function isTimestamp(value: unknown): value is string {
+  return typeof value === "string" && GENERATED_AT.test(value) && Number.isFinite(Date.parse(value));
+}
+
+function idList(value: unknown, max: number): string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > max) {
+    throw new ArchiveRejection("bad_manifest");
+  }
+  for (const item of value) {
+    if (typeof item !== "string" || !ID.test(item)) throw new ArchiveRejection("bad_manifest");
+  }
+  if (new Set(value).size !== value.length) throw new ArchiveRejection("bad_manifest");
+  return value as string[];
+}
+
+function exactKeys(record: Record<string, unknown>, keys: string[]): boolean {
+  const actual = Object.keys(record).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+/**
+ * A merge snapshot's `snapshot` block. The id is derived from the PR number
+ * and merge commit, so the stored key cannot drift from the merge it labels.
+ */
+function parseSnapshot(
+  value: unknown,
+  images: Array<{ screen: string; viewport: string }>,
+  limits: ArchiveLimits,
+): SnapshotInfo {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ArchiveRejection("bad_manifest");
+  const record = value as Record<string, unknown>;
+  if (!exactKeys(record, ["id", "kind", "pr", "mergeCommit", "mergedAt", "screens", "viewports"])) {
+    throw new ArchiveRejection("bad_manifest");
+  }
+  if (record.kind !== "merge") throw new ArchiveRejection("bad_manifest");
+  const pr = record.pr;
+  if (!pr || typeof pr !== "object" || Array.isArray(pr)) throw new ArchiveRejection("bad_manifest");
+  const prRecord = pr as Record<string, unknown>;
+  if (!exactKeys(prRecord, ["number", "title"])) throw new ArchiveRejection("bad_manifest");
+  const number = prRecord.number;
+  const title = prRecord.title;
+  if (typeof number !== "number" || !Number.isInteger(number) || number < 1 || number > 9_999_999) {
+    throw new ArchiveRejection("bad_manifest");
+  }
+  if (
+    typeof title !== "string" ||
+    title.trim().length === 0 ||
+    title !== title.trim() ||
+    title.length > MAX_TITLE ||
+    CONTROL.test(title)
+  ) {
+    throw new ArchiveRejection("bad_manifest");
+  }
+  if (typeof record.mergeCommit !== "string" || !COMMIT.test(record.mergeCommit)) {
+    throw new ArchiveRejection("bad_manifest");
+  }
+  if (!isTimestamp(record.mergedAt)) throw new ArchiveRejection("bad_manifest");
+  const id = record.id;
+  if (typeof id !== "string" || !SNAPSHOT_ID.test(id) || id !== `pr-${number}-${record.mergeCommit.slice(0, 12)}`) {
+    throw new ArchiveRejection("bad_manifest");
+  }
+  const screens = idList(record.screens, limits.maxEntries - 1);
+  const viewports = idList(record.viewports, limits.maxEntries - 1);
+  // Every image belongs to a declared screen and viewport, and every declared one has an image.
+  const usedScreens = new Set<string>();
+  const usedViewports = new Set<string>();
+  for (const image of images) {
+    const viewportId = image.viewport.split(" ")[0]!;
+    if (!screens.includes(image.screen) || !viewports.includes(viewportId)) {
+      throw new ArchiveRejection("bad_manifest");
+    }
+    usedScreens.add(image.screen);
+    usedViewports.add(viewportId);
+  }
+  if (usedScreens.size !== screens.length || usedViewports.size !== viewports.length) {
+    throw new ArchiveRejection("bad_manifest");
+  }
+  return {
+    id,
+    kind: "merge",
+    pr: { number, title },
+    mergeCommit: record.mergeCommit,
+    mergedAt: record.mergedAt,
+    screens: [...screens],
+    viewports: [...viewports],
+  };
+}
+
+function parseManifest(bytes: Uint8Array, limits: ArchiveLimits, snapshot = false): ParsedManifest {
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -351,14 +461,10 @@ function parseManifest(bytes: Uint8Array, limits: ArchiveLimits): {
     throw new ArchiveRejection("bad_manifest");
   }
   const record = parsed as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
-  if (keys.length !== 2 || keys[0] !== "generatedAt" || keys[1] !== "images") {
+  if (!exactKeys(record, snapshot ? ["generatedAt", "images", "snapshot"] : ["generatedAt", "images"])) {
     throw new ArchiveRejection("bad_manifest");
   }
-  if (typeof record.generatedAt !== "string" || !GENERATED_AT.test(record.generatedAt)) {
-    throw new ArchiveRejection("bad_manifest");
-  }
-  if (!Number.isFinite(Date.parse(record.generatedAt))) throw new ArchiveRejection("bad_manifest");
+  if (!isTimestamp(record.generatedAt)) throw new ArchiveRejection("bad_manifest");
   if (!Array.isArray(record.images) || record.images.length > limits.maxEntries - 1) {
     throw new ArchiveRejection("bad_manifest");
   }
@@ -389,19 +495,18 @@ function parseManifest(bytes: Uint8Array, limits: ArchiveLimits): {
   });
   const files = new Set(images.map((image) => image.file));
   if (files.size !== images.length) throw new ArchiveRejection("bad_manifest");
-  return { generatedAt: record.generatedAt, images };
+  if (!snapshot) return { generatedAt: record.generatedAt, images };
+  if (images.length === 0) throw new ArchiveRejection("bad_manifest");
+  return { generatedAt: record.generatedAt, images, snapshot: parseSnapshot(record.snapshot, images, limits) };
 }
 
-export async function validateGalleryZip(
-  bytes: Uint8Array,
-  limits: ArchiveLimits = LIMITS,
-): Promise<ValidatedArchive> {
+async function validateZip(bytes: Uint8Array, limits: ArchiveLimits, snapshot: boolean) {
   if (bytes.byteLength > limits.maxZipBytes) throw new ArchiveRejection("too_large");
   if (bytes.byteLength < 22) throw new ArchiveRejection("malformed");
   const entries = await readEntries(bytes, limits);
   const manifest = entries.find((entry) => entry.name === "manifest.json");
   if (!manifest) throw new ArchiveRejection("bad_manifest");
-  const parsed = parseManifest(manifest.bytes, limits);
+  const parsed = parseManifest(manifest.bytes, limits, snapshot);
   const byName = new Map(entries.map((entry) => [entry.name, entry]));
   if (byName.size !== entries.length) throw new ArchiveRejection("bad_path");
   const images: GalleryImage[] = [];
@@ -417,5 +522,27 @@ export async function validateGalleryZip(
       throw new ArchiveRejection("unexpected_entry");
     }
   }
-  return { generatedAt: parsed.generatedAt, images };
+  return { generatedAt: parsed.generatedAt, images, snapshot: parsed.snapshot };
+}
+
+/** The current archive: a manifest of only `generatedAt` and `images`. */
+export async function validateGalleryZip(
+  bytes: Uint8Array,
+  limits: ArchiveLimits = LIMITS,
+): Promise<ValidatedArchive> {
+  const { generatedAt, images } = await validateZip(bytes, limits, false);
+  return { generatedAt, images };
+}
+
+/**
+ * A merge snapshot: the same archive rules, plus a required `snapshot` block
+ * naming the PR, merge commit, merge time, screens and viewports.
+ */
+export async function validateSnapshotZip(
+  bytes: Uint8Array,
+  limits: ArchiveLimits = LIMITS,
+): Promise<ValidatedSnapshot> {
+  const { generatedAt, images, snapshot } = await validateZip(bytes, limits, true);
+  if (!snapshot) throw new ArchiveRejection("bad_manifest");
+  return { generatedAt, images, snapshot };
 }

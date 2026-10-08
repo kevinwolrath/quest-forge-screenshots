@@ -41,4 +41,6 @@ A new QuestForge workflow will download an artifact from a selected successful s
 
 The publisher accepts one ZIP. The Worker stores that ZIP as the single object `current-screenshots.zip` only after validation. The browser downloads that one object and unpacks it. There is no per-image R2 URL.
 
-`manifest.json` may contain only `generatedAt` (UTC timestamp) and `images`. Each image has `file`, `screen`, and `viewport`. Image paths match `images/<name>.png`, `.jpg`, `.jpeg`, or `.webp`. Extra manifest fields, path traversal, unexpected names, and non-image bytes are rejected.
+Merge snapshots are the one other stored object type. `POST /publish/snapshots/<id>` (the same upload secret) stores `snapshots/<id>.zip` after validation, where `<id>` is `pr-<number>-<first 12 hex of the merge commit>`; a retry of the same merge replaces that object only. It never replaces `current-screenshots.zip` or another merge's snapshot. `GET /snapshots/<id>` returns it to a signed-in viewer only.
+
+`manifest.json` may contain only `generatedAt` (UTC timestamp) and `images`. A snapshot's manifest also has `snapshot` (`id`, `kind: "merge"`, `pr` `{ number, title }`, `mergeCommit`, `mergedAt`, `screens`, `viewports`); the id must match the PR number and merge commit and the path, and the screens and viewports must match the images exactly. Each image has `file`, `screen`, and `viewport`. Image paths match `images/<name>.png`, `.jpg`, `.jpeg`, or `.webp`. Extra manifest fields, path traversal, unexpected names, and non-image bytes are rejected.

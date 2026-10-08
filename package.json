@@ -9,6 +9,7 @@
     "capture:fixture": "tsx scripts/run-fixture-capture.ts",
     "capture:docker-fixture": "tsx scripts/verify-docker-capture.ts",
     "publish:archive": "tsx publisher/cli.ts",
+    "publish:snapshot": "tsx publisher/cli.ts --snapshot",
     "stage-artifact": "tsx scripts/stage-artifact.ts",
     "test": "tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",

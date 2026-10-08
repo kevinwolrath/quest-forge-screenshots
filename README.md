@@ -37,6 +37,39 @@ The ZIP is validated before the stored object is replaced:
 
 A rejected upload leaves the previous ZIP in place. A failed write does too. The gallery keeps one current set, not a history of runs.
 
+## Merge snapshots
+
+QuestForge also publishes a snapshot of the screens a merged pull request declared. It goes to its own object and never replaces `current-screenshots.zip`:
+
+- `POST /publish/snapshots/<id>` with the same upload secret. `<id>` is `pr-<number>-<first 12 hex of the merge commit>`, so a retry of the same merge replaces its own `snapshots/<id>.zip` instead of adding another.
+- The ZIP follows the archive rules above. Its `manifest.json` also has a `snapshot` block:
+
+  ```json
+  {
+    "generatedAt": "2026-10-08T09:10:00.000Z",
+    "snapshot": {
+      "id": "pr-278-696eb12abcde",
+      "kind": "merge",
+      "pr": { "number": 278, "title": "Show character portraits" },
+      "mergeCommit": "<40 hex>",
+      "mergedAt": "2026-10-08T09:00:00Z",
+      "screens": ["c03-characters"],
+      "viewports": ["desktop", "tablet", "mobile"]
+    },
+    "images": [{ "file": "images/c03-characters-desktop.png", "screen": "c03-characters", "viewport": "desktop 1440x900" }]
+  }
+  ```
+
+  The id must match the PR number, the merge commit and the path. `screens` and `viewports` are stable ids; every image belongs to one of each (its `viewport` label starts with the viewport id), and each listed id has an image. The PR title is plain text of at most 200 characters with no line breaks or control characters.
+- A rejected or failed write leaves any earlier snapshot and the current archive as they were.
+- `GET /snapshots/<id>` returns that ZIP to a signed-in viewer, behind the same Access check as `/archive`. Listing and showing snapshots in the gallery page is separate work.
+
+```bash
+npm run publish:snapshot -- ./snapshot.zip
+```
+
+It validates the snapshot, then posts it to `/publish/snapshots/<id>` on the `GALLERY_PUBLISH_URL` origin, and prints the stored key.
+
 Local publisher command, from a checkout of this repository:
 
 ```bash
