@@ -3,6 +3,7 @@ import type { ArchiveLimits } from "./limits.ts";
 export type GalleryEvent = {
   key?: string;
   preventDefault?: () => void;
+  target?: GalleryNode | null;
 };
 
 export type GalleryNode = {
@@ -12,6 +13,13 @@ export type GalleryNode = {
   alt: string;
   type: string;
   disabled: boolean;
+  scrollTop: number;
+  scrollLeft: number;
+  classList: {
+    add(token: string): void;
+    remove(token: string): void;
+    contains(token: string): boolean;
+  };
   append(child: GalleryNode): void;
   setAttribute(name: string, value: string): void;
   addEventListener(type: string, listener: (event?: GalleryEvent) => void): void;
@@ -304,6 +312,21 @@ export async function startGallery(
   let index = 0;
   let opener: GalleryNode | null = null;
   let savedScroll = 0;
+  let actualSize = false;
+
+  const applySize = () => {
+    if (actualSize) viewer.classList.add("is-actual");
+    else viewer.classList.remove("is-actual");
+    full.setAttribute("aria-pressed", actualSize ? "true" : "false");
+    full.setAttribute("title", actualSize ? "Fit to page" : "Full size");
+    viewer.scrollTop = 0;
+    viewer.scrollLeft = 0;
+  };
+
+  const toggleSize = () => {
+    actualSize = !actualSize;
+    applySize();
+  };
 
   const readScroll = () => (typeof globalThis.scrollY === "number" ? globalThis.scrollY : 0);
   const restoreScroll = (y: number) => {
@@ -351,6 +374,8 @@ export async function startGallery(
     button.addEventListener("click", () => {
       opener = button;
       savedScroll = readScroll();
+      actualSize = false;
+      applySize();
       showAt(slideIndex);
       viewer.showModal();
       close.focus({ preventScroll: true });
@@ -369,6 +394,17 @@ export async function startGallery(
   });
   close.addEventListener("click", () => {
     viewer.close();
+  });
+  viewer.addEventListener("click", (event) => {
+    const target = event?.target;
+    if (target === close || target === prev || target === next) return;
+    toggleSize();
+  });
+  full.addEventListener("keydown", (event) => {
+    const key = event?.key;
+    if (key !== "Enter" && key !== " ") return;
+    event?.preventDefault?.();
+    toggleSize();
   });
   viewer.addEventListener("keydown", (event) => {
     const key = event?.key;

@@ -76,6 +76,7 @@ describe("fail-closed gallery routes", () => {
     assert.match(html, /aria-label="Next image"/);
     assert.match(html, /id="prev"/);
     assert.match(html, /id="next"/);
+    assert.match(html, /title="Full size"/);
     assert.equal(html.includes("innerHTML"), false);
     assert.equal(html.includes(Buffer.from(PNG).toString("base64")), false);
 

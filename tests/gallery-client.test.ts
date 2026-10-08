@@ -14,9 +14,21 @@ class FakeNode implements GalleryNode {
   alt = "";
   type = "";
   disabled = false;
+  scrollTop = 0;
+  scrollLeft = 0;
   open = false;
   children: FakeNode[] = [];
   private dom: FakeDom | null = null;
+  private classes = new Set<string>();
+  readonly classList = {
+    add: (token: string) => {
+      this.classes.add(token);
+    },
+    remove: (token: string) => {
+      this.classes.delete(token);
+    },
+    contains: (token: string) => this.classes.has(token),
+  };
   private listeners = new Map<string, Array<(event?: GalleryEvent) => void>>();
 
   attach(dom: FakeDom): void {
@@ -122,6 +134,22 @@ describe("flat gallery client", () => {
     assert.equal(dom.nodes.get("prev")?.disabled, false);
     assert.equal(dom.nodes.get("next")?.disabled, true);
     assert.equal(dom.activeElement, dom.nodes.get("close"));
+    assert.equal(dom.nodes.get("viewer")?.classList.contains("is-actual"), false);
+
+    const viewer = dom.nodes.get("viewer");
+    const full = dom.nodes.get("full");
+    viewer?.emit("click", { target: full });
+    assert.equal(viewer?.classList.contains("is-actual"), true);
+    viewer?.emit("click", { target: dom.nodes.get("close") });
+    viewer?.emit("click", { target: dom.nodes.get("prev") });
+    assert.equal(viewer?.classList.contains("is-actual"), true);
+    viewer?.emit("keydown", { key: "ArrowLeft" });
+    assert.equal(dom.nodes.get("full-label")?.textContent, "home · desktop");
+    assert.equal(viewer?.classList.contains("is-actual"), true);
+    full?.emit("keydown", { key: "Enter" });
+    assert.equal(viewer?.classList.contains("is-actual"), false);
+    viewer?.emit("keydown", { key: "ArrowRight" });
+    assert.equal(dom.nodes.get("full-label")?.textContent, "home · mobile");
 
     dom.nodes.get("prev")?.click();
     assert.equal(dom.nodes.get("full-label")?.textContent, "home · desktop");

@@ -182,6 +182,44 @@ describe("gallery browser", () => {
       assert.equal(await page.locator("#next").isDisabled(), false);
       await assertFitted(portrait.width, portrait.height);
 
+      const assertActual = async (intrinsicWidth: number, intrinsicHeight: number) => {
+        const viewport = page.viewportSize();
+        assert.ok(viewport);
+        assert.equal(await page.locator("#viewer").evaluate((dialog) => dialog.classList.contains("is-actual")), true);
+        assert.equal(await page.locator("#full").getAttribute("aria-pressed"), "true");
+        assert.equal(await page.locator("#full").getAttribute("title"), "Fit to page");
+        const box = await page.locator("#full").boundingBox();
+        assert.ok(box);
+        assert.ok(Math.abs(box.width - intrinsicWidth) <= 8, `width ${box.width}`);
+        assert.ok(Math.abs(box.height - intrinsicHeight) <= 8, `height ${box.height}`);
+        const scrolls = await page.locator("#viewer").evaluate((dialog) => {
+          const node = dialog as HTMLDialogElement;
+          return node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1;
+        });
+        assert.equal(scrolls, true);
+        for (const selector of ["#close", "#prev", "#next"]) {
+          const control = await page.locator(selector).boundingBox();
+          assert.ok(control, selector);
+          assert.ok(control.width >= 44 && control.height >= 44, selector);
+          assert.ok(control.x >= -1 && control.y >= -1, selector);
+          assert.ok(control.x + control.width <= viewport.width + 1, selector);
+          assert.ok(control.y + control.height <= viewport.height + 1, selector);
+        }
+      };
+
+      await page.locator("#full").click();
+      await assertActual(portrait.width, portrait.height);
+      await page.locator("#next").click();
+      assert.equal(await page.locator("#full-label").innerText(), "square · tablet");
+      await assertActual(1400, 1400);
+      await page.locator("#full").click();
+      assert.equal(await page.locator("#viewer").evaluate((dialog) => dialog.classList.contains("is-actual")), false);
+      assert.equal(await page.locator("#full").getAttribute("title"), "Full size");
+      await assertFitted(1400, 1400);
+      await page.keyboard.press("ArrowLeft");
+      assert.equal(await page.locator("#full-label").innerText(), "tall · mobile");
+      await assertFitted(portrait.width, portrait.height);
+
       await page.locator("#prev").click();
       assert.equal(await page.locator("#full-label").innerText(), "wide · desktop");
       assert.equal(await page.locator("#prev").isDisabled(), true);

@@ -213,6 +213,59 @@ const PAGE_STYLE = `
     border-radius: 8px;
     border: 1px solid var(--border);
     background: #0a0908;
+    cursor: zoom-in;
+  }
+  dialog img:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+  dialog.is-actual {
+    overflow: auto;
+    align-items: safe center;
+    justify-content: safe center;
+  }
+  dialog.is-actual .viewer-stage {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
+    min-height: 0;
+  }
+  dialog.is-actual .viewer-frame {
+    flex: 0 0 auto;
+    width: auto;
+    height: auto;
+  }
+  dialog.is-actual img {
+    max-width: none;
+    max-height: none;
+    cursor: zoom-out;
+  }
+  dialog.is-actual .viewer-bar {
+    align-self: stretch;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-elevated);
+  }
+  dialog.is-actual .dialog-close {
+    position: fixed;
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    right: calc(8px + env(safe-area-inset-right, 0px));
+    z-index: 3;
+  }
+  dialog.is-actual #prev {
+    position: fixed;
+    left: calc(8px + env(safe-area-inset-left, 0px));
+    top: 50%;
+    z-index: 3;
+    transform: translateY(-50%);
+  }
+  dialog.is-actual #next {
+    position: fixed;
+    right: calc(8px + env(safe-area-inset-right, 0px));
+    top: 50%;
+    z-index: 3;
+    transform: translateY(-50%);
   }
   .dialog-close,
   .dialog-nav {
@@ -343,7 +396,7 @@ export function galleryDocumentHtml(): string {
         </svg>
       </button>
       <div class="viewer-frame">
-        <img id="full" alt="">
+        <img id="full" alt="" role="button" tabindex="0" aria-pressed="false" title="Full size">
       </div>
       <button id="next" class="dialog-nav" type="button" aria-label="Next image">
         <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">
