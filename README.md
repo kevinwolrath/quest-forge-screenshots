@@ -16,11 +16,20 @@ There is no second runner and no cross-repository dispatch. The upload credentia
 
 Viewers sign in with Cloudflare Access using the Cloudflare identity provider, limited to members of the Cloudflare account. There is no email one-time PIN and no viewer email allowlist.
 
-The Worker fails closed. `GET /` and `GET /archive` return 403 before any gallery HTML or ZIP bytes when the Access token is missing, the Access team domain or audience is unset, or the token does not verify. The publisher secret does not unlock those routes.
+The Worker fails closed. `GET /`, `GET /archive`, `GET /api/merges` and `GET /merges/<id>/archive` return 403 before any gallery HTML or ZIP bytes when the Access token is missing, the Access team domain or audience is unset, or the token does not verify. The publisher secret does not unlock those routes.
 
 A signed-in browser loads `/`, downloads `/archive` once, and unpacks the ZIP locally into one flat responsive grid. Captions show the screen and viewport labels from the manifest, plus the `generatedAt` timestamp. Images can be opened larger. The page does not request one R2 object per image.
 
-R2 stays private. The only stored object is `current-screenshots.zip`. Public bucket access and `r2.dev` URLs are not part of this design.
+The **Show** selector switches between **Develop: full gallery** and the **Last 10 merges** (from `/api/merges`). Choosing a merge downloads only that merge's archive and shows its pull request number and title, merge time, short merge commit and screen ids above a grid of just those screens.
+
+R2 stays private. Public bucket access and `r2.dev` URLs are not part of this design. Objects are grouped by prefix:
+
+| Key | What | Written by |
+| --- | --- | --- |
+| `develop/archive.zip` | The full current develop gallery | `POST /publish` only; never pruned |
+| `merges/<id>/archive.zip` | One merge's snapshot | `POST /publish/snapshots/<id>` |
+| `merges/<id>/manifest.json` | That merge's summary, read by `/api/merges` | The same request, after the archive |
+| `current-screenshots.zip` | The develop gallery before the `develop/` prefix | Nothing now; `/archive` reads it only until `develop/archive.zip` exists |
 
 ## Publish
 
@@ -35,11 +44,11 @@ The ZIP is validated before the stored object is replaced:
 - No extra archive entries, absolute paths, or `..` segments
 - Zip size, entry count, and expanded size stay under the limits in `src/limits.ts` (the zip limit is below the Workers Free 100 MiB request-body cap)
 
-A rejected upload leaves the previous ZIP in place. A failed write does too. The gallery keeps one current set, not a history of runs.
+A rejected upload leaves the previous ZIP in place. A failed write does too. A develop publish writes only `develop/archive.zip`; it never touches a merge folder.
 
 ## Merge snapshots
 
-QuestForge also publishes a snapshot of the screens a merged pull request declared. It goes to its own object and never replaces `current-screenshots.zip`:
+QuestForge also publishes a snapshot of the screens a merged pull request declared. It goes to its own `merges/<id>/` folder and never replaces the develop gallery:
 
 - `POST /publish/snapshots/<id>` with the same upload secret. `<id>` is `pr-<number>-<first 12 hex of the merge commit>`, so a retry of the same merge replaces its own `merges/<id>/archive.zip` instead of adding another.
 - The ZIP follows the archive rules above. Its `manifest.json` also has a `snapshot` block:
@@ -62,7 +71,10 @@ QuestForge also publishes a snapshot of the screens a merged pull request declar
 
   The id must match the PR number, the merge commit and the path. `screens` and `viewports` are stable ids; every image belongs to one of each (its `viewport` label starts with the viewport id), and each listed id has an image. The PR title is plain text of at most 200 characters with no line breaks or control characters.
 - A rejected or failed write leaves any earlier snapshot and the current archive as they were.
-- `GET /merges/<id>/archive` returns that ZIP to a signed-in viewer, behind the same Access check as `/archive`. Listing and showing snapshots in the gallery page is separate work.
+- After the archive, the Worker writes `merges/<id>/manifest.json`: the `snapshot` block plus `generatedAt` and the image count. If either write fails the publish fails (503) and nothing is pruned; a retry rewrites the folder.
+- **Retention**: after a merge is stored, the Worker keeps the 10 newest merges by `mergedAt` and deletes the folders of older ones, plus folders left without a readable summary (other than the one just stored). Publishing the 11th distinct merge removes the oldest. A late retry of a merge older than the newest 10 is stored and removed again. `develop/` is never pruned. If deleting fails, the publish still succeeds with `"retention": "incomplete"` and the next merge publish catches up; the list shows only the newest 10 either way. The response lists the removed ids in `pruned`.
+- `GET /api/merges` returns `{ "merges": [...] }`, the newest 10 summaries (`id`, `pr`, `mergeCommit`, `mergedAt`, `screens`, `viewports`, `generatedAt`, `images`), newest first.
+- `GET /merges/<id>/archive` returns that ZIP. Both routes sit behind the same Access check as `/archive`; the upload secret does not open them.
 
 ```bash
 npm run publish:snapshot -- ./snapshot.zip

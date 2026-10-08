@@ -39,8 +39,8 @@ A new QuestForge workflow will download an artifact from a selected successful s
 
 ## Gallery contract
 
-The publisher accepts one ZIP. The Worker stores that ZIP as the single object `current-screenshots.zip` only after validation. The browser downloads that one object and unpacks it. There is no per-image R2 URL.
+The publisher accepts one ZIP per request. A develop publish (`POST /publish`) stores it as `develop/archive.zip` only after validation; nothing else writes or prunes `develop/`. The browser downloads one archive at a time and unpacks it. There is no per-image R2 URL. `current-screenshots.zip` is the pre-`develop/` key, read only as a fallback.
 
-Merge snapshots are the one other stored object type. `POST /publish/snapshots/<id>` (the same upload secret) stores `merges/<id>/archive.zip` after validation, where `<id>` is `pr-<number>-<first 12 hex of the merge commit>`; a retry of the same merge replaces that object only. It never replaces `current-screenshots.zip` or another merge's snapshot. `GET /merges/<id>/archive` returns it to a signed-in viewer only.
+Merge snapshots live in `merges/<id>/` folders. `POST /publish/snapshots/<id>` (the same upload secret) stores `merges/<id>/archive.zip` and then `merges/<id>/manifest.json` after validation, where `<id>` is `pr-<number>-<first 12 hex of the merge commit>`; a retry of the same merge replaces that folder only. Only after both writes succeed does the Worker prune merge folders past the newest 10 by `mergedAt`; a refused or failed upload never prunes. `GET /api/merges` and `GET /merges/<id>/archive` are Access-only viewer routes.
 
 `manifest.json` may contain only `generatedAt` (UTC timestamp) and `images`. A snapshot's manifest also has `snapshot` (`id`, `kind: "merge"`, `pr` `{ number, title }`, `mergeCommit`, `mergedAt`, `screens`, `viewports`); the id must match the PR number and merge commit and the path, and the screens and viewports must match the images exactly. Each image has `file`, `screen`, and `viewport`. Image paths match `images/<name>.png`, `.jpg`, `.jpeg`, or `.webp`. Extra manifest fields, path traversal, unexpected names, and non-image bytes are rejected.
