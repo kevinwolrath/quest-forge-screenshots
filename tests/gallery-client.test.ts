@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { describe, it } from "node:test";
 
-import { startGallery, type GalleryNode } from "../src/gallery-client.ts";
+import { startGallery, type GalleryEvent, type GalleryNode } from "../src/gallery-client.ts";
 import { galleryDocumentHtml } from "../src/gallery-page.ts";
 import { LIMITS } from "../src/limits.ts";
 import { galleryZip, PNG } from "./gallery-fixtures.ts";
@@ -13,9 +13,15 @@ class FakeNode implements GalleryNode {
   src = "";
   alt = "";
   type = "";
+  disabled = false;
   open = false;
   children: FakeNode[] = [];
-  private listeners = new Map<string, Array<() => void>>();
+  private dom: FakeDom | null = null;
+  private listeners = new Map<string, Array<(event?: GalleryEvent) => void>>();
+
+  attach(dom: FakeDom): void {
+    this.dom = dom;
+  }
 
   append(child: GalleryNode): void {
     this.children.push(child as FakeNode);
@@ -23,14 +29,18 @@ class FakeNode implements GalleryNode {
 
   setAttribute(): void {}
 
-  addEventListener(type: string, listener: () => void): void {
+  addEventListener(type: string, listener: (event?: GalleryEvent) => void): void {
     const list = this.listeners.get(type) ?? [];
     list.push(listener);
     this.listeners.set(type, list);
   }
 
+  emit(type: string, event?: GalleryEvent): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+
   click(): void {
-    for (const listener of this.listeners.get("click") ?? []) listener();
+    this.emit("click");
   }
 
   showModal(): void {
@@ -38,17 +48,30 @@ class FakeNode implements GalleryNode {
   }
 
   close(): void {
+    if (!this.open) return;
     this.open = false;
+    this.emit("close");
+  }
+
+  focus(): void {
+    this.dom?.setActive(this);
   }
 }
 
 class FakeDom {
   readonly nodes = new Map<string, FakeNode>();
+  activeElement: FakeNode | null = null;
 
   constructor() {
-    for (const id of ["when", "status", "grid", "viewer", "full", "full-label", "close"]) {
-      this.nodes.set(id, new FakeNode());
+    for (const id of ["when", "status", "grid", "viewer", "full", "full-label", "close", "prev", "next"]) {
+      const node = new FakeNode();
+      node.attach(this);
+      this.nodes.set(id, node);
     }
+  }
+
+  setActive(node: FakeNode): void {
+    this.activeElement = node;
   }
 
   getElementById(id: string): FakeNode | null {
@@ -56,7 +79,9 @@ class FakeDom {
   }
 
   createElement(): FakeNode {
-    return new FakeNode();
+    const node = new FakeNode();
+    node.attach(this);
+    return node;
   }
 }
 
@@ -89,11 +114,59 @@ describe("flat gallery client", () => {
     assert.equal(grid?.children.length, 2);
     assert.equal(grid?.children[0]?.children[0]?.children[1]?.textContent, "home · desktop");
     assert.equal(grid?.children[1]?.children[0]?.children[1]?.textContent, "home · mobile");
-    grid?.children[1]?.children[0]?.click();
+    const opener = grid?.children[1]?.children[0];
+    opener?.click();
     assert.equal(dom.nodes.get("viewer")?.open, true);
     assert.equal(dom.nodes.get("full-label")?.textContent, "home · mobile");
+    assert.equal(dom.nodes.get("full")?.alt, "home · mobile");
+    assert.equal(dom.nodes.get("prev")?.disabled, false);
+    assert.equal(dom.nodes.get("next")?.disabled, true);
+    assert.equal(dom.activeElement, dom.nodes.get("close"));
+
+    dom.nodes.get("prev")?.click();
+    assert.equal(dom.nodes.get("full-label")?.textContent, "home · desktop");
+    assert.equal(dom.nodes.get("prev")?.disabled, true);
+    assert.equal(dom.nodes.get("next")?.disabled, false);
+    dom.nodes.get("prev")?.click();
+    assert.equal(dom.nodes.get("full-label")?.textContent, "home · desktop");
+
+    dom.nodes.get("viewer")?.emit("keydown", { key: "ArrowRight" });
+    assert.equal(dom.nodes.get("full-label")?.textContent, "home · mobile");
+    assert.equal(dom.nodes.get("next")?.disabled, true);
+    dom.nodes.get("viewer")?.emit("keydown", { key: "ArrowRight" });
+    assert.equal(dom.nodes.get("full-label")?.textContent, "home · mobile");
+    dom.nodes.get("viewer")?.emit("keydown", { key: "ArrowLeft" });
+    assert.equal(dom.nodes.get("full-label")?.textContent, "home · desktop");
+    dom.nodes.get("next")?.focus();
+    dom.nodes.get("viewer")?.emit("keydown", { key: "ArrowRight" });
+    assert.equal(dom.nodes.get("full-label")?.textContent, "home · mobile");
+    assert.equal(dom.nodes.get("next")?.disabled, true);
+    assert.equal(dom.activeElement, dom.nodes.get("close"));
     dom.nodes.get("close")?.click();
     assert.equal(dom.nodes.get("viewer")?.open, false);
+    assert.equal(dom.activeElement, opener);
+
+    const scroll = globalThis as { scrollY?: number; scrollTo?: (x: number, y: number) => void };
+    const previousScrollY = scroll.scrollY;
+    const previousScrollTo = scroll.scrollTo;
+    let restored = -1;
+    scroll.scrollY = 480;
+    scroll.scrollTo = (_x, y) => {
+      restored = y;
+    };
+    try {
+      grid?.children[0]?.children[0]?.click();
+      assert.equal(dom.nodes.get("full-label")?.textContent, "home · desktop");
+      dom.nodes.get("close")?.click();
+      assert.equal(dom.nodes.get("viewer")?.open, false);
+      assert.equal(dom.activeElement, grid?.children[0]?.children[0]);
+      assert.equal(restored, 480);
+    } finally {
+      if (previousScrollY === undefined) delete scroll.scrollY;
+      else scroll.scrollY = previousScrollY;
+      if (previousScrollTo === undefined) delete scroll.scrollTo;
+      else scroll.scrollTo = previousScrollTo;
+    }
   });
 
   it("shows an empty state and rejects a bad archive without rendering images", async () => {
@@ -146,5 +219,13 @@ describe("flat gallery client", () => {
     assert.equal(dom.nodes.get("when")?.textContent, "2026-10-04T12:00:00.000Z");
     assert.equal(dom.nodes.get("grid")?.children.length, 1);
     assert.equal(dom.nodes.get("grid")?.children[0]?.children[0]?.children[1]?.textContent, "home · desktop");
+    dom.nodes.get("grid")?.children[0]?.children[0]?.click();
+    assert.equal(dom.nodes.get("viewer")?.open, true);
+    assert.equal(dom.nodes.get("prev")?.disabled, true);
+    assert.equal(dom.nodes.get("next")?.disabled, true);
+    assert.equal(dom.activeElement, dom.nodes.get("close"));
+    dom.nodes.get("close")?.click();
+    assert.equal(dom.nodes.get("viewer")?.open, false);
+    assert.equal(dom.activeElement, dom.nodes.get("grid")?.children[0]?.children[0]);
   });
 });
